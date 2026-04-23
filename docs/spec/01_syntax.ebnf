@@ -1,0 +1,59 @@
+(* Astranova Language Grammar v1.0 *)
+(* This is the source code that the parser will understand. *)
+
+program         = { definition | world_stmt } EOF
+
+definition      = "\let" identifier [ "(" param_list ")" ] "=" expr
+                | "\const" identifier ":" type "=" expr
+
+world_stmt      = "@world" expr
+
+expr            = logic_expr
+
+logic_expr      = comp_expr { ( "&&" | "||" ) comp_expr }
+
+comp_expr       = add_expr { ( "<" | ">" | "<=" | ">=" | "==" | "!=" ) add_expr }
+
+add_expr        = mul_expr { ( "+" | "-" ) mul_expr }
+
+mul_expr        = pow_expr { ( "*" | "/" | "\cdot" | "\times" ) pow_expr }
+
+pow_expr        = unary_expr { "^" unary_expr }
+
+unary_expr      = ( "+" | "-" | "\sin" | "\cos" | "\log" | "\sqrt" | "\abs" ) unary_expr
+                | primary
+
+primary         = NUMBER
+                | IDENTIFIER
+                | GREEK_LETTER
+                | string
+                | unit_annotation
+                | "(" expr ")"
+                | "\frac{" expr "}{" expr "}"
+                | "\sum_{" IDENTIFIER "=" expr "}^{" expr "}" expr
+                | "\prod_{" IDENTIFIER "=" expr "}^{" expr "}" expr
+                | "\int_{" expr "}^{" expr "}" expr "\," "d" IDENTIFIER
+                | "\lim_{" IDENTIFIER "\to" expr "}" expr
+                | "\begin{cases}" case_body "\end{cases}"
+                | tuple_expr
+                | list_expr
+
+case_body       = expr "&" condition { "\\" expr "&" condition }
+
+type            = "Scalar" [ "[" unit_spec "]" ]
+                | "Vector" "[" dimension "]"
+                | "Matrix" "[" rows "," cols "]"
+                | "Tensor"
+                | "Sovereign"          (* Only in Kernel Seed *)
+                | "State" "->" type    (* Function type *)
+                | "Manifold" "<" dimension ">"
+
+unit_spec       = UNIT_ID { ( "*" | "/" | "^" ) UNIT_ID }
+
+(* Lexer tokens (defined by patterns) *)
+IDENTIFIER       = /[a-zA-Z_][a-zA-Z0-9_]*/
+NUMBER           = /\d+(\.\d+)?([eE][+-]?\d+)?/
+GREEK_LETTER    = /\\[a-zA-Z]+/           (* Will be resolved to known Greek letters *)
+string           = /"[^"]*"/
+unit_annotation  = /\[[^\]]*\]/
+UNIT_ID          = /[a-zA-Z]+/            (* Inside unit annotation *)
