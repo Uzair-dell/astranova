@@ -1,18 +1,28 @@
-use serde::{Serialize, Deserialize};
+/// Astranova Compiler - Stage 0 Bootstrap Library
+/// Phase 0.3: Sanity check that the crate builds and tests pass.
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct WorldState {
-    pub tick: u64,
-    pub active_players: u32,
-    pub status: String,
+pub fn greet() -> String {
+    "Astranova v0.1.0 ready.".to_string()
 }
 
-impl WorldState {
-    pub fn new() -> Self {
-        Self {
-            tick: 0,
-            active_players: 0,
-            status: String::from("Stationary"),
-        }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn project_is_alive() {
+        let msg = greet();
+        assert!(msg.contains("Astranova"));
+    }
+
+    #[test]
+    fn unit_arithmetic_example() {
+        // Simulate what the parser would produce:
+        // V = 4 / 3 * pi * r^3
+        // This test doesn't parse yet; it just checks our thinking.
+        let pi = std::f64::consts::PI;
+        let r: f64 = 5.0;
+        let volume = 4.0 / 3.0 * pi * r.powf(3.0);
+        assert!((volume - 523.598).abs() < 0.01);
     }
 }
