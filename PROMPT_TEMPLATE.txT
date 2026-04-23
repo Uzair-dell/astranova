@@ -1,0 +1,18 @@
+[ASTRA-NOVA COMPILER TASK PROMPT]
+Project: Astranova (pure mathematics programming language)
+Stage: Stage 0 Bootstrap Compiler (Rust)
+Repository: https://github.com/Uzair-dell/astranova
+
+Specification documents are in docs/spec/:
+- docs/spec/01_syntax.ebnf  (grammar)
+- docs/spec/02_ast_nodes.md (AST node types)
+- docs/spec/03_type_theory.md (type & unit rules)
+- docs/spec/04_nuclear_patterns.json (loop elimination rules)
+- docs/spec/05_world_abi.h (C runtime interface)
+
+I am working on the file: [INSERT FILE PATH HERE]
+Current task: [INSERT TASK DESCRIPTION]
+
+[PASTE RELEVANT SNIPPET FROM A SPEC FILE HERE]
+
+Please generate Rust code that is safe, idiomatic, well‑commented, and follows the specification above.

@@ -1,5 +1,8 @@
 /// Astranova Compiler - Stage 0 Bootstrap Library
-/// Phase 0.3: Sanity check that the crate builds and tests pass.
+
+// Module declarations (must be at crate root)
+pub mod ast;
+pub mod lexer;
 
 pub fn greet() -> String {
     "Astranova v0.1.0 ready.".to_string()
@@ -17,12 +20,37 @@ mod tests {
 
     #[test]
     fn unit_arithmetic_example() {
-        // Simulate what the parser would produce:
-        // V = 4 / 3 * pi * r^3
-        // This test doesn't parse yet; it just checks our thinking.
         let pi = std::f64::consts::PI;
         let r: f64 = 5.0;
         let volume = 4.0 / 3.0 * pi * r.powf(3.0);
         assert!((volume - 523.598).abs() < 0.01);
+    }
+
+    #[test]
+    fn ast_sphere_volume_example() {
+        use crate::ast::*;
+
+        let ast = Definition::Let {
+            name: "V".to_string(),
+            params: vec![],
+            body: Expr::BinaryOp {
+                op: BinOp::Mul,
+                left: Box::new(Expr::BinaryOp {
+                    op: BinOp::Mul,
+                    left: Box::new(Expr::Frac {
+                        num: Box::new(Expr::Number(4.0)),
+                        den: Box::new(Expr::Number(3.0)),
+                    }),
+                    right: Box::new(Expr::GreekLetter("\\pi".to_string())),
+                }),
+                right: Box::new(Expr::Pow {
+                    base: Box::new(Expr::Variable("r".to_string())),
+                    exp:  Box::new(Expr::Number(3.0)),
+                }),
+            },
+        };
+
+        let debug_string = format!("{:?}", ast);
+        assert!(debug_string.contains("V"));
     }
 }
