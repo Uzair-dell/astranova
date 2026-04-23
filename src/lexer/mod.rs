@@ -1,52 +1,58 @@
 //! Astranova Lexer – converts raw source text into tokens.
+//! Extended with Colon, And, Or, Underscore, Backslash.
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
     Identifier(String),
     Number(f64),
     StringLiteral(String),
-    GreekLetter(String),       // e.g. \pi, \alpha
+    GreekLetter(String),
 
-    Let,                       // \let
-    Const,                     // \const
-    World,                     // @world
+    Let,
+    Const,
+    World,
 
-    LBrace,                    // {
-    RBrace,                    // }
-    LParen,                    // (
-    RParen,                    // )
-    LSquare,                   // [
-    RSquare,                   // ]
+    LBrace,
+    RBrace,
+    LParen,
+    RParen,
+    LSquare,
+    RSquare,
     Comma,
     Semicolon,
+    Colon,
+    Underscore,
+    Backslash,
 
-    Plus,                      // +
-    Minus,                     // -
-    Star,                      // *
-    Slash,                     // /
-    Caret,                     // ^
-    Times,                     // \times
-    Cdot,                      // \cdot
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    Caret,
+    Times,
+    Cdot,
 
-    Eq,                        // ==
-    Neq,                       // !=
-    Lt,                        // <
-    Gt,                        // >
-    Le,                        // <=
-    Ge,                        // >=
+    Eq,
+    Neq,
+    Lt,
+    Gt,
+    Le,
+    Ge,
+    And,
+    Or,
 
-    Equal,                     // = (single)
+    Equal,
 
-    Frac,                      // \frac
-    Sum,                       // \sum
-    Prod,                      // \prod
-    Int,                       // \int
-    Lim,                       // \lim
-    CasesBegin,                // \begin{cases}
-    CasesEnd,                  // \end{cases}
-    Amp,                       // & (inside cases)
+    Frac,
+    Sum,
+    Prod,
+    Int,
+    Lim,
+    CasesBegin,
+    CasesEnd,
+    Amp,
 
-    UnitAnnotation(String),    // [...] content
+    UnitAnnotation(String),
 }
 
 struct Lexer<'a> {
@@ -143,6 +149,11 @@ impl<'a> Lexer<'a> {
         // LaTeX commands (backslash)
         if c == '\\' {
             self.advance();
+            // Check for double backslash (\\) which is line separator in cases
+            if self.current_char() == Some('\\') {
+                self.advance();
+                return Some(Token::Backslash);
+            }
             let cmd = self.read_identifier_or_greek();
             match cmd.as_str() {
                 "let" => return Some(Token::Let),
@@ -196,12 +207,32 @@ impl<'a> Lexer<'a> {
             ']' => { self.advance(); return Some(Token::RSquare); }
             ',' => { self.advance(); return Some(Token::Comma); }
             ';' => { self.advance(); return Some(Token::Semicolon); }
+            ':' => { self.advance(); return Some(Token::Colon); }
+            '_' => { self.advance(); return Some(Token::Underscore); }
             '+' => { self.advance(); return Some(Token::Plus); }
             '-' => { self.advance(); return Some(Token::Minus); }
             '*' => { self.advance(); return Some(Token::Star); }
             '/' => { self.advance(); return Some(Token::Slash); }
             '^' => { self.advance(); return Some(Token::Caret); }
-            '&' => { self.advance(); return Some(Token::Amp); }
+            '&' => {
+                self.advance();
+                if self.current_char() == Some('&') {
+                    self.advance();
+                    return Some(Token::And);
+                } else {
+                    return Some(Token::Amp);
+                }
+            }
+            '|' => {
+                self.advance();
+                if self.current_char() == Some('|') {
+                    self.advance();
+                    return Some(Token::Or);
+                } else {
+                    // Single | not used; skip it
+                    return self.next_token();
+                }
+            }
             '=' => {
                 self.advance();
                 if self.current_char() == Some('=') {
@@ -238,6 +269,7 @@ impl<'a> Lexer<'a> {
                     return Some(Token::Gt);
                 }
             }
+            '"' => unreachable!(),
             _ => {
                 if c.is_alphabetic() || c == '_' {
                     let ident = self.read_identifier_or_greek();
@@ -287,8 +319,6 @@ mod tests {
 
     #[test]
     fn lex_world_pragma() {
-        // This is what the user writes:  @world Print("hello")
-        // We simulate the source text as a normal Rust string (escaped quotes).
         let src = "@world Print(\"hello\")";
         let tokens = lex(src);
         assert_eq!(tokens[0], Token::World);

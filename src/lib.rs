@@ -1,8 +1,8 @@
 /// Astranova Compiler - Stage 0 Bootstrap Library
 
-// Module declarations (must be at crate root)
 pub mod ast;
 pub mod lexer;
+pub mod parser;
 
 pub fn greet() -> String {
     "Astranova v0.1.0 ready.".to_string()
