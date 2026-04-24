@@ -131,7 +131,6 @@ impl Parser {
             }
             Some(Token::Identifier(s)) if s == "Vector" => {
                 self.advance();
-                // TODO: parse number inside brackets
                 let dim = 3;
                 let unit = self.parse_unit_opt();
                 Type::Vector(dim, unit)
@@ -144,18 +143,18 @@ impl Parser {
         }
     }
 
-  fn parse_unit_opt(&mut self) -> Option<crate::ast::Unit> {
-    if let Some(Token::UnitAnnotation(content)) = self.peek() {
-        // Clone the string so we can release the immutable borrow
-        let content = content.clone();
-        self.advance(); // now safe – no outstanding borrow
-        let mut map = std::collections::HashMap::new();
-        map.insert(content, 1);
-        Some(map)
-    } else {
-        None
+    fn parse_unit_opt(&mut self) -> Option<crate::ast::Unit> {
+        if let Some(Token::UnitAnnotation(content)) = self.peek() {
+            let content = content.clone();
+            self.advance();
+            let mut map = std::collections::HashMap::new();
+            map.insert(content, 1);
+            Some(map)
+        } else {
+            None
+        }
     }
-}
+
     // ---------- Expressions (precedence climbing) ----------
 
     fn parse_expr(&mut self, min_prec: u8) -> Expr {
@@ -184,7 +183,7 @@ impl Parser {
             if prec < min_prec {
                 break;
             }
-            self.advance(); // consume operator
+            self.advance();
             let right = self.parse_expr(prec + 1);
             left = Expr::BinaryOp {
                 op,
@@ -201,14 +200,13 @@ impl Parser {
             Token::Number(n) => Expr::Number(n),
             Token::Identifier(s) => Expr::Variable(s),
             Token::GreekLetter(g) => Expr::GreekLetter(g),
-            Token::StringLiteral(s) => Expr::Variable(s),
+            Token::StringLiteral(s) => Expr::StringLiteral(s),
             Token::LParen => {
                 let expr = self.parse_expr(0);
                 self.expect(Token::RParen);
                 expr
             }
             Token::LBrace => {
-                // This shouldn't happen in normal expressions; for now, treat as error
                 panic!("Unexpected '{{'");
             }
             Token::Frac => {
@@ -232,40 +230,39 @@ impl Parser {
                 };
                 self.expect(Token::Equal);
                 let start = self.parse_expr(0);
+                self.expect(Token::RBrace);
                 self.expect(Token::Caret);
                 self.expect(Token::LBrace);
                 let end = self.parse_expr(0);
                 self.expect(Token::RBrace);
-                self.expect(Token::RBrace); // close outer brace after _ {...}
                 let body = self.parse_expr(0);
                 Expr::Sum {
                     index,
                     start: Box::new(start),
-                    end: Box::new(end),
-                    body: Box::new(body),
+                    end:   Box::new(end),
+                    body:  Box::new(body),
                 }
             }
             Token::Prod => {
-                panic!("Product not yet supported");
-            }
-            Token::Int => {
                 self.expect(Token::Underscore);
                 self.expect(Token::LBrace);
-                let lower = self.parse_expr(0);
+                let index = match self.advance() {
+                    Token::Identifier(s) => s.clone(),
+                    _ => panic!("Expected identifier after prod_"),
+                };
+                self.expect(Token::Equal);
+                let start = self.parse_expr(0);
+                self.expect(Token::RBrace);
                 self.expect(Token::Caret);
                 self.expect(Token::LBrace);
-                let upper = self.parse_expr(0);
+                let end = self.parse_expr(0);
                 self.expect(Token::RBrace);
-                self.expect(Token::RBrace);
-                let integrand = self.parse_expr(0);
-                // Skip \, d and var – we haven't tokenized \, d, but for now skip manually
-                // Expect a comma maybe? We'll skip requiring it for now.
-                let var = "x".to_string(); // dummy
-                Expr::Integral {
-                    var,
-                    lower: Box::new(lower),
-                    upper: Box::new(upper),
-                    integrand: Box::new(integrand),
+                let body = self.parse_expr(0);
+                Expr::Prod {
+                    index,
+                    start: Box::new(start),
+                    end:   Box::new(end),
+                    body:  Box::new(body),
                 }
             }
             Token::Lim => {
@@ -292,8 +289,17 @@ impl Parser {
                 Expr::Cases { branches }
             }
             Token::World => {
-                let expr = self.parse_expr(0);
-                Expr::WorldPragma(Box::new(expr))
+                let maybe_msg = match self.peek() {
+                    Some(Token::StringLiteral(s)) => Some(s.clone()),
+                    _ => None,
+                };
+                match maybe_msg {
+                    Some(s) => {
+                        self.advance(); // consume the string token
+                        Expr::WorldPragma(Box::new(Expr::StringLiteral(s)))
+                    }
+                    _ => panic!("Expected a string after @world"),
+                }
             }
             _ => panic!("Unexpected token: {:?}", self.tokens.get(self.pos - 1)),
         }

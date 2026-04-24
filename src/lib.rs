@@ -4,6 +4,9 @@ pub mod ast;
 pub mod lexer;
 pub mod parser;
 pub mod typecheck;
+pub mod optimizer;
+pub mod eval;  
+pub mod runtime;   
 
 pub fn greet() -> String {
     "Astranova v0.1.0 ready.".to_string()

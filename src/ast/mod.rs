@@ -6,8 +6,8 @@
 //! Reference: docs/spec/02_ast_nodes.md
 
 /// Binary operators (arithmetic, comparison, logic)
-#[derive(Debug, Clone, PartialEq)]
-pub enum BinOp {
+#[derive(Debug, Clone, Copy, PartialEq)]
+ pub enum BinOp {
     Add,
     Sub,
     Mul,
@@ -23,10 +23,10 @@ pub enum BinOp {
     Ge,
     And,
     Or,
-}
+ }
 
 /// Unary operators (negation, trig, etc.)
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum UnOp {
     Neg,
     Pos,
@@ -43,6 +43,9 @@ pub enum UnOp {
 pub enum Expr {
     /// A numeric literal, e.g., 3.14, 6.022e23
     Number(f64),
+
+    /// A string literal, e.g., "hello"
+    StringLiteral(String),   // <-- NEW
 
     /// A named variable, e.g., x, mass, gravitational_constant
     Variable(String),
@@ -75,7 +78,7 @@ pub enum Expr {
         den: Box<Expr>,
     },
 
-    /// Exponentiation: base ^ exp (typically from x^2 syntax)
+    /// Exponentiation: base ^ exp
     Pow {
         base: Box<Expr>,
         exp:  Box<Expr>,
@@ -112,18 +115,18 @@ pub enum Expr {
         body:     Box<Expr>,
     },
 
-    /// Piecewise function: \begin{cases} expr1 & cond1 \\ expr2 & cond2 \end{cases}
+    /// Piecewise function
     Cases {
-        branches: Vec<(Expr, Expr)>, // (value, condition)
+        branches: Vec<(Expr, Expr)>,
     },
 
-    /// Ordered collection (a,b,c)
+    /// Ordered collection
     Tuple(Vec<Expr>),
 
-    /// Homogeneous list [a,b,c]
+    /// Homogeneous list
     List(Vec<Expr>),
 
-    /// A side‑effecting world interaction, written as @world expr
+    /// A side‑effecting world interaction, @world expr
     WorldPragma(Box<Expr>),
 }
 

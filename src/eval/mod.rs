@@ -1,114 +1,136 @@
 //! Evaluator – walks the AST and computes numeric results.
-//! Uses a simple environment (HashMap) for variable lookup.
+//! Now carries WorldToken and ConsoleToken for side effects.
 
 use std::collections::HashMap;
 use crate::ast::{Expr, BinOp, UnOp};
+use crate::runtime::{WorldToken, ConsoleToken, print};
 use std::f64::consts::PI;
 
-/// Evaluation result: either a number (for now) or an error message.
-pub type EvalResult = Result<f64, String>;
+pub type EvalResult = Result<(f64, Option<WorldToken>), String>;
 
-/// Evaluate an expression given an environment mapping variable names to values.
-pub fn eval(expr: &Expr, env: &HashMap<String, f64>) -> EvalResult {
+pub fn eval(
+    expr: &Expr,
+    env: &HashMap<String, f64>,
+    world: Option<WorldToken>,
+    console: Option<&ConsoleToken>,
+) -> EvalResult {
     match expr {
-        Expr::Number(n) => Ok(*n),
+        Expr::Number(n) => Ok((*n, world)),
+
+        Expr::StringLiteral(_) => Err("String literals cannot be evaluated numerically".to_string()),
 
         Expr::Variable(name) => {
-            env.get(name)
+            let val = env.get(name)
                 .copied()
-                .ok_or_else(|| format!("Undefined variable: {}", name))
+                .ok_or_else(|| format!("Undefined variable: {}", name))?;
+            Ok((val, world))
         }
 
         Expr::GreekLetter(g) => {
-            match g.as_str() {
-                "\\pi" => Ok(PI),
-                "\\tau" => Ok(2.0 * PI),
-                "\\phi" => Ok(1.618033988749895), // golden ratio
-                _ => Err(format!("Unknown Greek constant: {}", g)),
-            }
+            let val = match g.as_str() {
+                "\\pi" => PI,
+                "\\tau" => 2.0 * PI,
+                "\\phi" => 1.618033988749895,
+                _ => return Err(format!("Unknown Greek constant: {}", g)),
+            };
+            Ok((val, world))
         }
 
         Expr::BinaryOp { op, left, right } => {
-            let l = eval(left, env)?;
-            let r = eval(right, env)?;
-            match op {
-                BinOp::Add => Ok(l + r),
-                BinOp::Sub => Ok(l - r),
-                BinOp::Mul | BinOp::Dot | BinOp::Cross => Ok(l * r),
-                BinOp::Div => Ok(l / r),
-                BinOp::Pow => Ok(l.powf(r)),
-                BinOp::Eq => Ok(if (l - r).abs() < f64::EPSILON { 1.0 } else { 0.0 }),
-                BinOp::Neq => Ok(if (l - r).abs() >= f64::EPSILON { 1.0 } else { 0.0 }),
-                BinOp::Lt => Ok(if l < r { 1.0 } else { 0.0 }),
-                BinOp::Gt => Ok(if l > r { 1.0 } else { 0.0 }),
-                BinOp::Le => Ok(if l <= r { 1.0 } else { 0.0 }),
-                BinOp::Ge => Ok(if l >= r { 1.0 } else { 0.0 }),
-                BinOp::And => Ok(if l != 0.0 && r != 0.0 { 1.0 } else { 0.0 }),
-                BinOp::Or => Ok(if l != 0.0 || r != 0.0 { 1.0 } else { 0.0 }),
-            }
+            let (l, world) = eval(left, env, world, console)?;
+            let (r, world) = eval(right, env, world, console)?;
+            let result = match op {
+                BinOp::Add => l + r,
+                BinOp::Sub => l - r,
+                BinOp::Mul | BinOp::Dot | BinOp::Cross => l * r,
+                BinOp::Div => l / r,
+                BinOp::Pow => l.powf(r),
+                BinOp::Eq => if (l - r).abs() < f64::EPSILON { 1.0 } else { 0.0 },
+                BinOp::Neq => if (l - r).abs() >= f64::EPSILON { 1.0 } else { 0.0 },
+                BinOp::Lt => if l < r { 1.0 } else { 0.0 },
+                BinOp::Gt => if l > r { 1.0 } else { 0.0 },
+                BinOp::Le => if l <= r { 1.0 } else { 0.0 },
+                BinOp::Ge => if l >= r { 1.0 } else { 0.0 },
+                BinOp::And => if l != 0.0 && r != 0.0 { 1.0 } else { 0.0 },
+                BinOp::Or => if l != 0.0 || r != 0.0 { 1.0 } else { 0.0 },
+            };
+            Ok((result, world))
         }
 
         Expr::UnaryOp { op, operand } => {
-            let x = eval(operand, env)?;
-            match op {
-                UnOp::Neg => Ok(-x),
-                UnOp::Pos => Ok(x),
-                UnOp::Sin => Ok(x.sin()),
-                UnOp::Cos => Ok(x.cos()),
-                UnOp::Log => Ok(x.ln()),
-                UnOp::Sqrt => Ok(x.sqrt()),
-                UnOp::Abs => Ok(x.abs()),
-            }
+            let (x, world) = eval(operand, env, world, console)?;
+            let result = match op {
+                UnOp::Neg => -x,
+                UnOp::Pos => x,
+                UnOp::Sin => x.sin(),
+                UnOp::Cos => x.cos(),
+                UnOp::Log => x.ln(),
+                UnOp::Sqrt => x.sqrt(),
+                UnOp::Abs => x.abs(),
+            };
+            Ok((result, world))
         }
 
         Expr::Frac { num, den } => {
-            let n = eval(num, env)?;
-            let d = eval(den, env)?;
-            Ok(n / d)
+            let (n, world) = eval(num, env, world, console)?;
+            let (d, world) = eval(den, env, world, console)?;
+            Ok((n / d, world))
         }
 
-        // Sum / Prod – for a given environment we can't loop if end is variable.
-        // For now, if end is a constant, we can compute the loop; otherwise error.
         Expr::Sum { index, start, end, body } => {
-            let start_val = eval(start, env)? as i64;
-            let end_val = eval(end, env)? as i64;
+            let (start_val, world) = eval(start, env, world, console)?;
+            let (end_val, world) = eval(end, env, world, console)?;
             let mut sum = 0.0;
+            let mut current_world = world;
             let mut local_env = env.clone();
-            for i in start_val..=end_val {
+            for i in (start_val as i64)..=(end_val as i64) {
                 local_env.insert(index.clone(), i as f64);
-                sum += eval(body, &local_env)?;
+                let (val, w) = eval(body, &local_env, current_world, console)?;
+                sum += val;
+                current_world = w;
             }
-            Ok(sum)
+            Ok((sum, current_world))
         }
 
         Expr::Prod { index, start, end, body } => {
-            let start_val = eval(start, env)? as i64;
-            let end_val = eval(end, env)? as i64;
+            let (start_val, world) = eval(start, env, world, console)?;
+            let (end_val, world) = eval(end, env, world, console)?;
             let mut prod = 1.0;
+            let mut current_world = world;
             let mut local_env = env.clone();
-            for i in start_val..=end_val {
+            for i in (start_val as i64)..=(end_val as i64) {
                 local_env.insert(index.clone(), i as f64);
-                prod *= eval(body, &local_env)?;
+                let (val, w) = eval(body, &local_env, current_world, console)?;
+                prod *= val;
+                current_world = w;
             }
-            Ok(prod)
+            Ok((prod, current_world))
         }
 
-        Expr::Integral { .. } => {
-            Err("Integration not yet supported in evaluator".to_string())
-        }
+        Expr::Integral { .. } => Err("Integration not supported yet".to_string()),
 
-        Expr::Cases { branches } => {
+                Expr::Cases { branches } => {
+            let mut current_world = world.clone();
             for (value, cond) in branches {
-                let c = eval(cond, env)?;
+                let (c, w) = eval(cond, env, current_world, console)?;
+                current_world = w;
                 if c != 0.0 {
-                    return eval(value, env);
+                    return eval(value, env, current_world, console);
                 }
             }
             Err("No case matched".to_string())
         }
 
-        Expr::WorldPragma(_) => {
-            Err("World pragma cannot be evaluated directly".to_string())
+        Expr::WorldPragma(inner) => {
+            let world = world.ok_or("Missing WorldToken for @world")?;
+            let console = console.ok_or("Missing ConsoleToken for @world")?;
+
+            if let Expr::StringLiteral(msg) = &**inner {
+                let new_world = print(world, console, msg);
+                return Ok((0.0, Some(new_world)));
+            }
+
+            Err("Invalid @world usage".to_string())
         }
 
         _ => Err(format!("Evaluation not supported for {:?}", expr)),
@@ -126,7 +148,10 @@ mod tests {
         let mut parser = Parser::new(tokens);
         let prog = parser.parse_program();
         match &prog[0] {
-            crate::ast::Definition::Let { body, .. } => eval(body, env),
+            crate::ast::Definition::Let { body, .. } => {
+                let (val, _) = eval(body, env, None, None)?; // no tokens for pure math
+                Ok(val)
+            }
             _ => panic!("Expected let"),
         }
     }
@@ -145,7 +170,7 @@ mod tests {
         assert!((result - 523.598).abs() < 0.01);
     }
 
-       #[test]
+    #[test]
     fn sum_loop() {
         // \sum_{i=1}^{5} i  = 15
         let expr = Expr::Sum {
@@ -154,7 +179,21 @@ mod tests {
             end: Box::new(Expr::Number(5.0)),
             body: Box::new(Expr::Variable("i".to_string())),
         };
-        let result = eval(&expr, &HashMap::new()).unwrap();
+        let (result, _) = eval(&expr, &HashMap::new(), None, None).unwrap();
         assert_eq!(result, 15.0);
+    }
+
+    #[test]
+    fn world_print_with_tokens() {
+        // Build AST equivalent to: @world "Hello, Astranova!"
+        let expr = Expr::WorldPragma(Box::new(Expr::StringLiteral("Hello, Astranova!".to_string())));
+        let world = Some(WorldToken);
+        let console = ConsoleToken;
+
+        let (val, new_world) = eval(&expr, &HashMap::new(), world, Some(&console)).unwrap();
+        // val is dummy (0.0)
+        assert_eq!(val, 0.0);
+        // new_world should be Some(...) – token returned
+        assert!(new_world.is_some());
     }
 }

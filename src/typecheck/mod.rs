@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 pub mod unify;
+pub mod infer;
 
 /// The possible types in Astranova.
 #[derive(Debug, Clone, PartialEq)]
