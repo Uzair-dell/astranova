@@ -106,3 +106,7 @@ pub fn free(world: WorldToken, ptr: MemPtr) -> WorldToken {
 /// Only the kernel can create this token; user code cannot.
 #[derive(Debug, Clone)]
 pub struct SovereignToken;
+/// Token needed for dangerous meta‑operations (e.g. @world Eval).
+/// Only the compiler bootstrap or the kernel should provide it.
+#[derive(Debug, Clone)]
+pub struct UnsafeToken;

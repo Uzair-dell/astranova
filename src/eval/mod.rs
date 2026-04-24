@@ -1,5 +1,5 @@
 //! Evaluator – walks the AST and computes numeric results.
-//! Layer 4: Sovereign ring bypasses all privilege checks.
+//! Layers 1‑5: World monad, Console, FS, Memory, Sovereign ring, Sandbox.
 
 use std::collections::HashMap;
 use crate::ast::{Expr, BinOp, UnOp};
@@ -8,6 +8,7 @@ use crate::runtime::{
     WorldToken,
     ConsoleToken,
     MemToken,
+    UnsafeToken,
     print,
     alloc, free, MemPtr,
 };
@@ -129,62 +130,53 @@ pub fn eval(
             Err("No case matched".to_string())
         }
 
-        // ---- World actions with sovereign bypass ----
+        // ---- World actions with sovereign bypass (Layer 4) + Sandbox (Layer 5) ----
         Expr::WorldPragma(inner) => {
             let world = ctx.world.take().ok_or("Missing WorldToken for @world")?;
             let sovereign = ctx.sovereign.is_some();
 
             match &**inner {
-                // ---- Print ----
+                // Print
                 Expr::StringLiteral(msg) => {
-                    let console = if sovereign {
-                        ConsoleToken   // sovereign doesn't need a stored token
-                    } else {
-                        ctx.console.take().ok_or("Missing ConsoleToken for Print")?
-                    };
+                    let console = if sovereign { ConsoleToken }
+                                  else { ctx.console.take().ok_or("Missing ConsoleToken for Print")? };
                     let new_world = print(world, &console, msg);
                     ctx.world = Some(new_world);
-                    if !sovereign {
-                        ctx.console = Some(console);  // return the token to context
-                    }
-                    Ok((0.0, None))
+                    if !sovereign { ctx.console = Some(console); }
+                    return Ok((0.0, None));
                 }
-
-                // ---- Alloc ----
+                // Alloc
                 Expr::FunctionCall { name, args } if name == "Alloc" => {
-                    if args.len() != 1 {
-                        return Err("Alloc expects one argument (size)".to_string());
-                    }
+                    if args.len() != 1 { return Err("Alloc expects one argument (size)".to_string()); }
                     let (size_val, _) = eval(&args[0], env, ctx)?;
-                    let mem = if sovereign {
-                        MemToken
-                    } else {
-                        ctx.mem.take().ok_or("Missing MemToken for Alloc")?
-                    };
+                    let mem = if sovereign { MemToken }
+                              else { ctx.mem.take().ok_or("Missing MemToken for Alloc")? };
                     let (new_world, ptr) = alloc(world, &mem, size_val as usize);
                     ctx.world = Some(new_world);
-                    if !sovereign {
-                        ctx.mem = Some(mem);
-                    }
-                    Ok((ptr.0 as usize as f64, None))
+                    if !sovereign { ctx.mem = Some(mem); }
+                    return Ok((ptr.0 as usize as f64, None));
                 }
-
-                // ---- Free ----
+                // Free
                 Expr::FunctionCall { name, args } if name == "Free" => {
-                    if args.len() != 1 {
-                        return Err("Free expects one argument (ptr)".to_string());
-                    }
+                    if args.len() != 1 { return Err("Free expects one argument (ptr)".to_string()); }
                     let (ptr_val, _) = eval(&args[0], env, ctx)?;
                     let ptr = MemPtr(ptr_val as usize as *mut std::ffi::c_void);
                     let new_world = free(world, ptr);
                     ctx.world = Some(new_world);
-                    Ok((0.0, None))
+                    return Ok((0.0, None));
                 }
-
-                _ => Err("Invalid @world usage".to_string()),
+                // Eval (Sandbox)
+                Expr::FunctionCall { name, args: _ } if name == "Eval" => {
+                    if !sovereign {
+                        let _ = ctx.unsafe_token.as_ref().ok_or("Missing UnsafeToken for @world Eval")?;
+                    }
+                    return Err("@world Eval is not yet implemented".to_string());
+                }
+                _ => return Err("Invalid @world usage".to_string()),
             }
         }
 
+        // Catch all other variants (FunctionCall not in @world, Pow, Limit, Tuple, List)
         _ => Err(format!("Evaluation not supported for {:?}", expr)),
     }
 }
@@ -204,6 +196,7 @@ mod tests {
             fs: None,
             mem: None,
             sovereign: None,
+            unsafe_token: None,
         }
     }
 
@@ -257,6 +250,7 @@ mod tests {
             fs: None,
             mem: None,
             sovereign: None,
+            unsafe_token: None,
         };
         let (val, _) = eval(&expr, &HashMap::new(), &mut ctx).unwrap();
         assert_eq!(val, 0.0);
@@ -273,6 +267,7 @@ mod tests {
             fs: Some(FSToken),
             mem: None,
             sovereign: None,
+            unsafe_token: None,
         };
 
         let (world, handle) = open_file(ctx.world.take().unwrap(), &FSToken, path, "w").unwrap();
@@ -304,6 +299,7 @@ mod tests {
             fs: None,
             mem: Some(MemToken),
             sovereign: None,
+            unsafe_token: None,
         };
         let alloc_expr = Expr::WorldPragma(Box::new(Expr::FunctionCall {
             name: "Alloc".to_string(),
@@ -322,10 +318,11 @@ mod tests {
     fn sovereign_can_print_without_console_token() {
         let mut ctx = RuntimeContext {
             world: Some(WorldToken),
-            console: None,                     // no console token
+            console: None,
             fs: None,
             mem: None,
-            sovereign: Some(SovereignToken),   // but we have sovereign
+            sovereign: Some(SovereignToken),
+            unsafe_token: None,
         };
         let expr = Expr::WorldPragma(Box::new(Expr::StringLiteral("Hello from sovereign!".to_string())));
         let (val, _) = eval(&expr, &HashMap::new(), &mut ctx).unwrap();
@@ -338,8 +335,9 @@ mod tests {
             world: Some(WorldToken),
             console: None,
             fs: None,
-            mem: None,                         // no mem token
+            mem: None,
             sovereign: Some(SovereignToken),
+            unsafe_token: None,
         };
         let alloc_expr = Expr::WorldPragma(Box::new(Expr::FunctionCall {
             name: "Alloc".to_string(),
@@ -352,5 +350,43 @@ mod tests {
             args: vec![Expr::Number(ptr_val)],
         }));
         eval(&free_expr, &HashMap::new(), &mut ctx).unwrap();
+    }
+
+    #[test]
+    fn eval_without_unsafe_token_fails() {
+        let mut ctx = RuntimeContext {
+            world: Some(WorldToken),
+            console: None,
+            fs: None,
+            mem: None,
+            sovereign: None,
+            unsafe_token: None,
+        };
+        let expr = Expr::WorldPragma(Box::new(Expr::FunctionCall {
+            name: "Eval".to_string(),
+            args: vec![Expr::StringLiteral("1 + 1".to_string())],
+        }));
+        let result = eval(&expr, &HashMap::new(), &mut ctx);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Missing UnsafeToken"));
+    }
+
+    #[test]
+    fn eval_with_unsafe_token_gets_not_implemented() {
+        let mut ctx = RuntimeContext {
+            world: Some(WorldToken),
+            console: None,
+            fs: None,
+            mem: None,
+            sovereign: None,
+            unsafe_token: Some(UnsafeToken),
+        };
+        let expr = Expr::WorldPragma(Box::new(Expr::FunctionCall {
+            name: "Eval".to_string(),
+            args: vec![Expr::StringLiteral("1 + 1".to_string())],
+        }));
+        let result = eval(&expr, &HashMap::new(), &mut ctx);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not yet implemented"));
     }
 }

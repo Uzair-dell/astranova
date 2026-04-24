@@ -1,4 +1,4 @@
-use crate::runtime::{WorldToken, ConsoleToken, FSToken, MemToken, SovereignToken};
+use crate::runtime::{WorldToken, ConsoleToken, FSToken, MemToken, SovereignToken, UnsafeToken};
 
 #[derive(Debug, Clone)]
 pub struct RuntimeContext {
@@ -6,5 +6,6 @@ pub struct RuntimeContext {
     pub console: Option<ConsoleToken>,
     pub fs: Option<FSToken>,
     pub mem: Option<MemToken>,
-    pub sovereign: Option<SovereignToken>,   // new
+    pub sovereign: Option<SovereignToken>,
+    pub unsafe_token: Option<UnsafeToken>,   
 }
