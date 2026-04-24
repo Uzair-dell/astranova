@@ -195,7 +195,7 @@ impl Parser {
         left
     }
 
-    fn parse_primary(&mut self) -> Expr {
+       fn parse_primary(&mut self) -> Expr {
         match self.advance().clone() {
             Token::Number(n) => Expr::Number(n),
             Token::Identifier(s) => Expr::Variable(s),
@@ -289,11 +289,11 @@ impl Parser {
                 Expr::Cases { branches }
             }
             Token::World => {
-                let maybe_msg = match self.peek() {
+                let msg = match self.peek() {
                     Some(Token::StringLiteral(s)) => Some(s.clone()),
                     _ => None,
                 };
-                match maybe_msg {
+                match msg {
                     Some(s) => {
                         self.advance(); // consume the string token
                         Expr::WorldPragma(Box::new(Expr::StringLiteral(s)))
@@ -301,8 +301,7 @@ impl Parser {
                     _ => panic!("Expected a string after @world"),
                 }
             }
-            _ => panic!("Unexpected token: {:?}", self.tokens.get(self.pos - 1)),
-                         Token::Parallel => {
+            Token::Parallel => {
                 self.expect(Token::LBrace);
                 let mut exprs = Vec::new();
                 loop {
@@ -315,6 +314,7 @@ impl Parser {
                 }
                 Expr::Parallel(exprs)
             }
+            _ => panic!("Unexpected token: {:?}", self.tokens.get(self.pos - 1)),
         }
     }
 
