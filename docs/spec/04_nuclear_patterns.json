@@ -6,8 +6,8 @@
       "template": {
         "node": "Sum",
         "index": "i",
-        "start": 1,
-        "end": "__n",
+        "start": { "node": "Number", "value": 1.0 },
+        "end": { "node": "Variable", "name": "__n" },
         "body": { "node": "Variable", "name": "i" }
       },
       "rewrite": {
@@ -21,10 +21,10 @@
             "node": "BinaryOp",
             "op": "+",
             "left": { "node": "Variable", "name": "__n" },
-            "right": { "node": "Number", "value": 1 }
+            "right": { "node": "Number", "value": 1.0 }
           }
         },
-        "right": { "node": "Number", "value": 2 }
+        "right": { "node": "Number", "value": 2.0 }
       }
     },
     {
@@ -33,12 +33,12 @@
       "template": {
         "node": "Sum",
         "index": "i",
-        "start": 1,
-        "end": "__n",
+        "start": { "node": "Number", "value": 1.0 },
+        "end": { "node": "Variable", "name": "__n" },
         "body": {
           "node": "Pow",
           "base": { "node": "Variable", "name": "i" },
-          "exp": { "node": "Number", "value": 2 }
+          "exp": { "node": "Number", "value": 2.0 }
         }
       },
       "rewrite": {
@@ -55,7 +55,7 @@
               "node": "BinaryOp",
               "op": "+",
               "left": { "node": "Variable", "name": "__n" },
-              "right": { "node": "Number", "value": 1 }
+              "right": { "node": "Number", "value": 1.0 }
             },
             "right": {
               "node": "BinaryOp",
@@ -63,14 +63,14 @@
               "left": {
                 "node": "BinaryOp",
                 "op": "*",
-                "left": { "node": "Number", "value": 2 },
+                "left": { "node": "Number", "value": 2.0 },
                 "right": { "node": "Variable", "name": "__n" }
               },
-              "right": { "node": "Number", "value": 1 }
+              "right": { "node": "Number", "value": 1.0 }
             }
           }
         },
-        "right": { "node": "Number", "value": 6 }
+        "right": { "node": "Number", "value": 6.0 }
       }
     },
     {
@@ -79,14 +79,14 @@
       "template": {
         "node": "Sum",
         "index": "i",
-        "start": 1,
-        "end": "__n",
-        "body": { "node": "Number", "value": "__c" }
+        "start": { "node": "Number", "value": 1.0 },
+        "end": { "node": "Variable", "name": "__n" },
+        "body": { "node": "Variable", "name": "__c" }
       },
       "rewrite": {
         "node": "BinaryOp",
         "op": "*",
-        "left": { "node": "Number", "value": "__c" },
+        "left": { "node": "Variable", "name": "__c" },
         "right": { "node": "Variable", "name": "__n" }
       }
     }
