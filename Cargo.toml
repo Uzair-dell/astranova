@@ -10,3 +10,7 @@ libc = "0.2"
 
 [build-dependencies]
 cc = "1"
+
+[[bin]]
+name = "astranova"
+path = "src/main.rs"
