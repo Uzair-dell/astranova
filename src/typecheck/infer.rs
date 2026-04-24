@@ -1,60 +1,61 @@
 //! Type inference for Astranova expressions.
 //! Walks the AST and returns the type of every node, performing unit unification.
+//! Phase 6: Sovereign constant (𝕌) typing – Reject(𝕌) is a type error.
 
 use std::collections::HashMap;
 use crate::ast::{Expr, BinOp, UnOp};
-use crate::typecheck::{Type, Unit};                     // corrected import
+use crate::typecheck::{Type, Unit};
 use crate::typecheck::unify::unify;
 
 /// Infer the type of an expression given a variable environment.
 pub fn infer(expr: &Expr, env: &HashMap<String, Type>) -> Result<Type, String> {
     match expr {
-        // Literals
-        Expr::Number(_) => Ok(Type::Scalar(None)),       // dimensionless by default
+        Expr::Number(_) => Ok(Type::Scalar(None)),
 
-        // Variable lookup
+        Expr::StringLiteral(_) => Ok(Type::Scalar(None)),
+
         Expr::Variable(name) => env.get(name)
             .cloned()
             .ok_or_else(|| format!("Undefined variable: {}", name)),
 
-        // Greek letters (built‑in constants)
         Expr::GreekLetter(g) => match g.as_str() {
-            "\\pi" | "\\tau" | "\\phi" => Ok(Type::Scalar(None)), // pure numbers
-            _ => Ok(Type::Scalar(None)), // treat others as dimensionless for now
+            "\\pi" | "\\tau" | "\\phi" => Ok(Type::Scalar(None)),
+            _ => Ok(Type::Scalar(None)),
         },
 
-        // Binary operations
         Expr::BinaryOp { op, left, right } => {
             let t_left = infer(left, env)?;
             let t_right = infer(right, env)?;
             infer_binary(op, &t_left, &t_right)
         }
 
-        // Unary operations
         Expr::UnaryOp { op, operand } => {
             let t_operand = infer(operand, env)?;
             infer_unary(op, &t_operand)
         }
 
-        // Fraction: both numerator and denominator must have the same type, result is that type
         Expr::Frac { num, den } => {
             let t_num = infer(num, env)?;
             let t_den = infer(den, env)?;
-            // Division: units subtract
             divide_types(&t_num, &t_den)
         }
 
-        // Summation / Product: body must be Scalar, index is dimensionless
+        Expr::Pow { base, exp } => {
+            let t_base = infer(base, env)?;
+            let t_exp = infer(exp, env)?;
+            ensure_dimensionless(&t_exp)?;
+            Ok(t_base)
+        }
+
         Expr::Sum { body, .. } | Expr::Prod { body, .. } => {
             let t_body = infer(body, env)?;
             ensure_scalar(t_body)
         }
 
-        // Integral: integrand must be a function of the integration variable,
-        // but for now just return the type of the integrand
         Expr::Integral { integrand, .. } => infer(integrand, env),
 
-        // Cases: all branches must have the same type
+        Expr::Limit { body, .. } => infer(body, env),
+
         Expr::Cases { branches } => {
             let mut iter = branches.iter().map(|(val, _)| infer(val, env));
             let first = iter.next().ok_or("Empty cases expression")??;
@@ -65,81 +66,29 @@ pub fn infer(expr: &Expr, env: &HashMap<String, Type>) -> Result<Type, String> {
             Ok(first)
         }
 
-        // Tuples / Lists: not implemented yet
-        Expr::Tuple(_) => Ok(Type::Scalar(None)),
-        Expr::List(_) => Ok(Type::Scalar(None)),
+        Expr::Tuple(_) => Err("Tuples are not yet fully typed".to_string()),
+        Expr::List(_) => Err("Lists are not yet fully typed".to_string()),
 
-        // World pragma: not type‑checked here
         Expr::WorldPragma(_) => Ok(Type::Scalar(None)),
 
-        // These should have been desugared or not appear here
-        Expr::FunctionCall { .. } => Err("Function calls not yet supported".to_string()),
-        _ => Err(format!("Type inference not implemented for {:?}", expr)),
-    }
-}
-
-/// Infer type of binary operation.
-fn infer_binary(op: &BinOp, left: &Type, right: &Type) -> Result<Type, String> {
-    match op {
-        BinOp::Add | BinOp::Sub => {
-            // Both sides must be the same type (including units)
-            unify_types(left, right)
-        }
-        BinOp::Mul | BinOp::Dot | BinOp::Cross => {
-            // Units add
-            multiply_types(left, right)
-        }
-        BinOp::Div => {
-            divide_types(left, right)
-        }
-        BinOp::Pow => {
-            // Exponent must be dimensionless
-            ensure_dimensionless(right)?;
-            // Base can be any scalar? For now, just return base type.
-            Ok(left.clone())
-        }
-        BinOp::Eq | BinOp::Neq | BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge => {
-            // Comparison: both sides same type, result is dimensionless Scalar
-            unify_types(left, right)?;
-            Ok(Type::Scalar(None))
-        }
-        BinOp::And | BinOp::Or => {
-            // Both must be dimensionless scalars
-            ensure_dimensionless(left)?;
-            ensure_dimensionless(right)?;
-            Ok(Type::Scalar(None))
+        Expr::FunctionCall { name, args } => {
+            if name == "Reject" {
+                if args.is_empty() {
+                    return Err("Reject expects exactly one argument".to_string());
+                }
+                let arg_type = infer(&args[0], env)?;
+                if let Type::Sovereign = arg_type {
+                    return Err("Type error: cannot reject the Sovereign (𝕌)".to_string());
+                }
+                return Ok(Type::Scalar(None));
+            }
+            Err(format!("Function calls not yet supported: {}", name))
         }
     }
 }
 
-/// Infer type of unary operation.
-fn infer_unary(op: &UnOp, operand: &Type) -> Result<Type, String> {
-    match op {
-        UnOp::Neg | UnOp::Pos => {
-            // Sign does not change type
-            Ok(operand.clone())
-        }
-        UnOp::Sin | UnOp::Cos => {
-            // Trigonometric functions: argument must be dimensionless, result dimensionless
-            ensure_dimensionless(operand)?;
-            Ok(Type::Scalar(None))
-        }
-        UnOp::Log | UnOp::Sqrt => {
-            // Argument must be dimensionless? Actually sqrt of an area? For now require dimensionless.
-            // Thus the result is also dimensionless.
-            ensure_dimensionless(operand)?;
-            Ok(Type::Scalar(None))
-        }
-        UnOp::Abs => {
-            // Absolute value: same type as operand
-            Ok(operand.clone())
-        }
-    }
-}
+// ---------- Helpers ----------
 
-// ---------- Helper functions for unit arithmetic ----------
-
-/// Ensure a type is a Scalar (with any unit), returning the scalar type.
 fn ensure_scalar(t: Type) -> Result<Type, String> {
     if let Type::Scalar(_) = t {
         Ok(t)
@@ -148,7 +97,6 @@ fn ensure_scalar(t: Type) -> Result<Type, String> {
     }
 }
 
-/// Ensure a type is dimensionless Scalar.
 fn ensure_dimensionless(t: &Type) -> Result<(), String> {
     match t {
         Type::Scalar(Some(unit)) if !unit.is_empty() => {
@@ -159,19 +107,16 @@ fn ensure_dimensionless(t: &Type) -> Result<(), String> {
     }
 }
 
-/// Unify two types (used for addition/subtraction/comparison).
 fn unify_types(a: &Type, b: &Type) -> Result<Type, String> {
     match (a, b) {
         (Type::Scalar(ua), Type::Scalar(ub)) => {
             let merged = unify(ua.as_ref(), ub.as_ref())?;
             Ok(Type::Scalar(merged))
         }
-        // Other combinations are errors for now
         _ => Err(format!("Type mismatch: {:?} vs {:?}", a, b)),
     }
 }
 
-/// Multiply two types: for scalars, unit maps are merged (exponents added).
 fn multiply_types(a: &Type, b: &Type) -> Result<Type, String> {
     match (a, b) {
         (Type::Scalar(ua), Type::Scalar(ub)) => {
@@ -182,7 +127,6 @@ fn multiply_types(a: &Type, b: &Type) -> Result<Type, String> {
     }
 }
 
-/// Divide two types: for scalars, unit exponents are subtracted.
 fn divide_types(a: &Type, b: &Type) -> Result<Type, String> {
     match (a, b) {
         (Type::Scalar(ua), Type::Scalar(ub)) => {
@@ -193,8 +137,6 @@ fn divide_types(a: &Type, b: &Type) -> Result<Type, String> {
     }
 }
 
-/// Combine two optional unit maps using a function on exponents for keys present in both.
-/// Keys unique to one map are kept as‑is (with exponent from that map).
 fn combine_units(
     a: &Option<Unit>,
     b: &Option<Unit>,
@@ -212,10 +154,45 @@ fn combine_units(
                     .and_modify(|e| *e = combine_fn(*e, b_exp))
                     .or_insert(b_exp);
             }
-            // Remove entries with exponent zero
             merged.retain(|_, v| *v != 0);
             if merged.is_empty() { None } else { Some(merged) }
         }
+    }
+}
+
+fn infer_binary(op: &BinOp, left: &Type, right: &Type) -> Result<Type, String> {
+    match op {
+        BinOp::Add | BinOp::Sub => unify_types(left, right),
+        BinOp::Mul | BinOp::Dot | BinOp::Cross => multiply_types(left, right),
+        BinOp::Div => divide_types(left, right),
+        BinOp::Pow => {
+            ensure_dimensionless(right)?;
+            Ok(left.clone())
+        }
+        BinOp::Eq | BinOp::Neq | BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge => {
+            unify_types(left, right)?;
+            Ok(Type::Scalar(None))
+        }
+        BinOp::And | BinOp::Or => {
+            ensure_dimensionless(left)?;
+            ensure_dimensionless(right)?;
+            Ok(Type::Scalar(None))
+        }
+    }
+}
+
+fn infer_unary(op: &UnOp, operand: &Type) -> Result<Type, String> {
+    match op {
+        UnOp::Neg | UnOp::Pos => Ok(operand.clone()),
+        UnOp::Sin | UnOp::Cos => {
+            ensure_dimensionless(operand)?;
+            Ok(Type::Scalar(None))
+        }
+        UnOp::Log | UnOp::Sqrt => {
+            ensure_dimensionless(operand)?;
+            Ok(Type::Scalar(None))
+        }
+        UnOp::Abs => Ok(operand.clone()),
     }
 }
 
@@ -231,7 +208,6 @@ mod tests {
         let tokens = crate::lexer::lex(src);
         let mut parser = crate::parser::Parser::new(tokens);
         let prog = parser.parse_program();
-        // Take the body of the first definition
         match &prog[0] {
             crate::ast::Definition::Let { body, .. } => infer(body, &empty_env()),
             _ => panic!("Expected Let"),
@@ -250,14 +226,41 @@ mod tests {
         assert_eq!(t, Ok(Type::Scalar(None)));
     }
 
-        #[test]
+    #[test]
     fn sin_dimensionless() {
-        // Build UnaryOp::Sin( Number(0) ) directly
+        use crate::ast::UnOp;
         let expr = Expr::UnaryOp {
             op: UnOp::Sin,
             operand: Box::new(Expr::Number(0.0)),
         };
         let result = infer(&expr, &empty_env());
         assert_eq!(result, Ok(Type::Scalar(None)));
+    }
+
+    #[test]
+    fn reject_sovereign_fails() {
+        let mut env = HashMap::new();
+        env.insert("𝕌".to_string(), Type::Sovereign);
+
+        let call = Expr::FunctionCall {
+            name: "Reject".to_string(),
+            args: vec![Expr::Variable("𝕌".to_string())],
+        };
+        let result = infer(&call, &env);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("cannot reject the Sovereign"));
+    }
+
+    #[test]
+    fn reject_non_sovereign_passes() {
+        let mut env = HashMap::new();
+        env.insert("user".to_string(), Type::Scalar(None));
+
+        let call = Expr::FunctionCall {
+            name: "Reject".to_string(),
+            args: vec![Expr::Variable("user".to_string())],
+        };
+        let result = infer(&call, &env);
+        assert!(result.is_ok());
     }
 }

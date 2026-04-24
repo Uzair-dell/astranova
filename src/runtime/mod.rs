@@ -110,3 +110,7 @@ pub struct SovereignToken;
 /// Only the compiler bootstrap or the kernel should provide it.
 #[derive(Debug, Clone)]
 pub struct UnsafeToken;
+/// Placeholder token for a hardware enclave (homomorphic execution).
+/// If present, the entire computation is running inside a secure enclave.
+#[derive(Debug, Clone)]
+pub struct EnclaveToken;
