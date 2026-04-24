@@ -144,22 +144,18 @@ impl Parser {
         }
     }
 
-    fn parse_unit_opt(&mut self) -> Option<crate::ast::Unit> {
-        if let Some(Token::LSquare) = self.peek() {
-            self.advance(); // consume '['
-            let content = match self.advance() {
-                Token::UnitAnnotation(s) => s.clone(),
-                other => panic!("Expected unit annotation, found {:?}", other),
-            };
-            let mut map = std::collections::HashMap::new();
-            map.insert(content, 1);
-            self.expect(Token::RSquare);
-            Some(map)
-        } else {
-            None
-        }
+  fn parse_unit_opt(&mut self) -> Option<crate::ast::Unit> {
+    if let Some(Token::UnitAnnotation(content)) = self.peek() {
+        // Clone the string so we can release the immutable borrow
+        let content = content.clone();
+        self.advance(); // now safe – no outstanding borrow
+        let mut map = std::collections::HashMap::new();
+        map.insert(content, 1);
+        Some(map)
+    } else {
+        None
     }
-
+}
     // ---------- Expressions (precedence climbing) ----------
 
     fn parse_expr(&mut self, min_prec: u8) -> Expr {
