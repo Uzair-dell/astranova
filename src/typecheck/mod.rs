@@ -2,6 +2,7 @@
 //! Based on docs/spec/03_type_theory.md
 
 use std::collections::HashMap;
+pub mod unify;
 
 /// The possible types in Astranova.
 #[derive(Debug, Clone, PartialEq)]
