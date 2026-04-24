@@ -1,9 +1,10 @@
 //! Evaluator – walks the AST and computes numeric results.
-//! Now carries WorldToken and ConsoleToken for side effects.
+//! Uses RuntimeContext for capability tokens (World, Console, FS).
 
 use std::collections::HashMap;
 use crate::ast::{Expr, BinOp, UnOp};
-use crate::runtime::{WorldToken, ConsoleToken, print};
+use crate::runtime::context::RuntimeContext;
+use crate::runtime::{WorldToken, print};
 use std::f64::consts::PI;
 
 pub type EvalResult = Result<(f64, Option<WorldToken>), String>;
@@ -11,11 +12,10 @@ pub type EvalResult = Result<(f64, Option<WorldToken>), String>;
 pub fn eval(
     expr: &Expr,
     env: &HashMap<String, f64>,
-    world: Option<WorldToken>,
-    console: Option<&ConsoleToken>,
+    ctx: &mut RuntimeContext,
 ) -> EvalResult {
     match expr {
-        Expr::Number(n) => Ok((*n, world)),
+        Expr::Number(n) => Ok((*n, ctx.world.take())),
 
         Expr::StringLiteral(_) => Err("String literals cannot be evaluated numerically".to_string()),
 
@@ -23,7 +23,7 @@ pub fn eval(
             let val = env.get(name)
                 .copied()
                 .ok_or_else(|| format!("Undefined variable: {}", name))?;
-            Ok((val, world))
+            Ok((val, ctx.world.take()))
         }
 
         Expr::GreekLetter(g) => {
@@ -33,12 +33,14 @@ pub fn eval(
                 "\\phi" => 1.618033988749895,
                 _ => return Err(format!("Unknown Greek constant: {}", g)),
             };
-            Ok((val, world))
+            Ok((val, ctx.world.take()))
         }
 
         Expr::BinaryOp { op, left, right } => {
-            let (l, world) = eval(left, env, world, console)?;
-            let (r, world) = eval(right, env, world, console)?;
+            let (l, _) = eval(left, env, ctx)?;
+            let w = ctx.world.take();
+            let (r, _) = eval(right, env, ctx)?;
+            ctx.world = ctx.world.take().or(w);
             let result = match op {
                 BinOp::Add => l + r,
                 BinOp::Sub => l - r,
@@ -54,11 +56,11 @@ pub fn eval(
                 BinOp::And => if l != 0.0 && r != 0.0 { 1.0 } else { 0.0 },
                 BinOp::Or => if l != 0.0 || r != 0.0 { 1.0 } else { 0.0 },
             };
-            Ok((result, world))
+            Ok((result, ctx.world.take()))
         }
 
         Expr::UnaryOp { op, operand } => {
-            let (x, world) = eval(operand, env, world, console)?;
+            let (x, _) = eval(operand, env, ctx)?;
             let result = match op {
                 UnOp::Neg => -x,
                 UnOp::Pos => x,
@@ -68,68 +70,67 @@ pub fn eval(
                 UnOp::Sqrt => x.sqrt(),
                 UnOp::Abs => x.abs(),
             };
-            Ok((result, world))
+            Ok((result, ctx.world.take()))
         }
 
         Expr::Frac { num, den } => {
-            let (n, world) = eval(num, env, world, console)?;
-            let (d, world) = eval(den, env, world, console)?;
-            Ok((n / d, world))
+            let (n, _) = eval(num, env, ctx)?;
+            let w = ctx.world.take();
+            let (d, _) = eval(den, env, ctx)?;
+            ctx.world = ctx.world.take().or(w);
+            Ok((n / d, ctx.world.take()))
         }
 
         Expr::Sum { index, start, end, body } => {
-            let (start_val, world) = eval(start, env, world, console)?;
-            let (end_val, world) = eval(end, env, world, console)?;
+            let (start_val, _) = eval(start, env, ctx)?;
+            let w = ctx.world.take();
+            let (end_val, _) = eval(end, env, ctx)?;
+            ctx.world = ctx.world.take().or(w);
             let mut sum = 0.0;
-            let mut current_world = world;
             let mut local_env = env.clone();
             for i in (start_val as i64)..=(end_val as i64) {
                 local_env.insert(index.clone(), i as f64);
-                let (val, w) = eval(body, &local_env, current_world, console)?;
+                let (val, _) = eval(body, &local_env, ctx)?;
                 sum += val;
-                current_world = w;
             }
-            Ok((sum, current_world))
+            Ok((sum, ctx.world.take()))
         }
 
         Expr::Prod { index, start, end, body } => {
-            let (start_val, world) = eval(start, env, world, console)?;
-            let (end_val, world) = eval(end, env, world, console)?;
+            let (start_val, _) = eval(start, env, ctx)?;
+            let w = ctx.world.take();
+            let (end_val, _) = eval(end, env, ctx)?;
+            ctx.world = ctx.world.take().or(w);
             let mut prod = 1.0;
-            let mut current_world = world;
             let mut local_env = env.clone();
             for i in (start_val as i64)..=(end_val as i64) {
                 local_env.insert(index.clone(), i as f64);
-                let (val, w) = eval(body, &local_env, current_world, console)?;
+                let (val, _) = eval(body, &local_env, ctx)?;
                 prod *= val;
-                current_world = w;
             }
-            Ok((prod, current_world))
+            Ok((prod, ctx.world.take()))
         }
 
         Expr::Integral { .. } => Err("Integration not supported yet".to_string()),
 
-                Expr::Cases { branches } => {
-            let mut current_world = world.clone();
+        Expr::Cases { branches } => {
             for (value, cond) in branches {
-                let (c, w) = eval(cond, env, current_world, console)?;
-                current_world = w;
+                let (c, _) = eval(cond, env, ctx)?;
                 if c != 0.0 {
-                    return eval(value, env, current_world, console);
+                    return eval(value, env, ctx);
                 }
             }
             Err("No case matched".to_string())
         }
 
         Expr::WorldPragma(inner) => {
-            let world = world.ok_or("Missing WorldToken for @world")?;
-            let console = console.ok_or("Missing ConsoleToken for @world")?;
-
+            let world = ctx.world.take().ok_or("Missing WorldToken for @world")?;
             if let Expr::StringLiteral(msg) = &**inner {
+                let console = ctx.console.as_ref().ok_or("Missing ConsoleToken for Print")?;
                 let new_world = print(world, console, msg);
-                return Ok((0.0, Some(new_world)));
+                ctx.world = Some(new_world);
+                return Ok((0.0, None));
             }
-
             Err("Invalid @world usage".to_string())
         }
 
@@ -142,14 +143,24 @@ mod tests {
     use super::*;
     use crate::lexer::lex;
     use crate::parser::Parser;
+    use crate::ast::Definition;
+
+    fn default_ctx() -> RuntimeContext {
+        RuntimeContext {
+            world: None,
+            console: None,
+            fs: None,
+        }
+    }
 
     fn eval_def(src: &str, env: &HashMap<String, f64>) -> Result<f64, String> {
         let tokens = lex(src);
         let mut parser = Parser::new(tokens);
         let prog = parser.parse_program();
         match &prog[0] {
-            crate::ast::Definition::Let { body, .. } => {
-                let (val, _) = eval(body, env, None, None)?; // no tokens for pure math
+            Definition::Let { body, .. } => {
+                let mut ctx = default_ctx();
+                let (val, _) = eval(body, env, &mut ctx)?;
                 Ok(val)
             }
             _ => panic!("Expected let"),
@@ -172,28 +183,58 @@ mod tests {
 
     #[test]
     fn sum_loop() {
-        // \sum_{i=1}^{5} i  = 15
         let expr = Expr::Sum {
             index: "i".to_string(),
             start: Box::new(Expr::Number(1.0)),
             end: Box::new(Expr::Number(5.0)),
             body: Box::new(Expr::Variable("i".to_string())),
         };
-        let (result, _) = eval(&expr, &HashMap::new(), None, None).unwrap();
+        let mut ctx = default_ctx();
+        let (result, _) = eval(&expr, &HashMap::new(), &mut ctx).unwrap();
         assert_eq!(result, 15.0);
     }
 
     #[test]
     fn world_print_with_tokens() {
-        // Build AST equivalent to: @world "Hello, Astranova!"
         let expr = Expr::WorldPragma(Box::new(Expr::StringLiteral("Hello, Astranova!".to_string())));
-        let world = Some(WorldToken);
-        let console = ConsoleToken;
-
-        let (val, new_world) = eval(&expr, &HashMap::new(), world, Some(&console)).unwrap();
-        // val is dummy (0.0)
+        let mut ctx = RuntimeContext {
+            world: Some(WorldToken),
+            console: Some(crate::runtime::ConsoleToken),
+            fs: None,
+        };
+        let (val, _) = eval(&expr, &HashMap::new(), &mut ctx).unwrap();
         assert_eq!(val, 0.0);
-        // new_world should be Some(...) – token returned
-        assert!(new_world.is_some());
+    }
+
+    #[test]
+    fn file_write_and_read() {
+        use crate::runtime::{FSToken, open_file, write_file, close_file, read_file};
+
+        let path = "test_layer2.txt";
+        let mut ctx = RuntimeContext {
+            world: Some(WorldToken),
+            console: None,
+            fs: Some(FSToken),
+        };
+
+        let (world, handle) = open_file(ctx.world.take().unwrap(), &FSToken, path, "w").unwrap();
+        ctx.world = Some(world);
+
+        let world = write_file(ctx.world.take().unwrap(), &handle, "hello");
+        ctx.world = Some(world);
+
+        let world = close_file(ctx.world.take().unwrap(), handle);
+        ctx.world = Some(world);
+
+        let (world, handle2) = open_file(ctx.world.take().unwrap(), &FSToken, path, "r").unwrap();
+        ctx.world = Some(world);
+
+        let (world, data) = read_file(ctx.world.take().unwrap(), &handle2, 10);
+        ctx.world = Some(world);
+
+        let world = close_file(ctx.world.take().unwrap(), handle2);
+        ctx.world = Some(world);
+
+        assert_eq!(data, Some("hello".to_string()));
     }
 }
