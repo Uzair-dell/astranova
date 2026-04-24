@@ -14,6 +14,10 @@ pub struct ConsoleToken;
 #[derive(Debug, Clone)]
 pub struct FSToken;
 
+/// Token for memory allocation / deallocation.
+#[derive(Debug, Clone)]
+pub struct MemToken;
+
 // ========== C function declarations ==========
 extern "C" {
     fn world_print(msg: *const std::os::raw::c_char);
@@ -21,6 +25,8 @@ extern "C" {
     fn world_close_file(handle: *mut std::ffi::c_void);
     fn world_read_file(handle: *mut std::ffi::c_void, size: usize) -> *mut std::os::raw::c_char;
     fn world_write_file(handle: *mut std::ffi::c_void, data: *const std::os::raw::c_char);
+    fn world_alloc(size: usize) -> *mut std::ffi::c_void;
+    fn world_free(ptr: *mut std::ffi::c_void);
 }
 
 // ========== Console ==========
@@ -33,15 +39,12 @@ pub fn print(world: WorldToken, _console: &ConsoleToken, msg: &str) -> WorldToke
 // ========== File system ==========
 use std::ffi::CString;
 
-/// A handle to an open file.
 #[derive(Debug)]
 pub struct FileHandle(pub *mut std::ffi::c_void);
 
-// We only use it on the calling thread, so this is safe.
 unsafe impl Send for FileHandle {}
 unsafe impl Sync for FileHandle {}
 
-/// Open a file. Requires WorldToken + FSToken. Returns a new WorldToken and the file handle.
 pub fn open_file(world: WorldToken, _fs: &FSToken, path: &str, mode: &str)
     -> Result<(WorldToken, FileHandle), String>
 {
@@ -55,13 +58,11 @@ pub fn open_file(world: WorldToken, _fs: &FSToken, path: &str, mode: &str)
     }
 }
 
-/// Close a file. Consumes the file handle, returns the WorldToken.
 pub fn close_file(world: WorldToken, handle: FileHandle) -> WorldToken {
     unsafe { world_close_file(handle.0); }
     world
 }
 
-/// Read up to `size` bytes from a file. Returns WorldToken and an optional String.
 pub fn read_file(world: WorldToken, handle: &FileHandle, size: usize)
     -> (WorldToken, Option<String>)
 {
@@ -76,9 +77,27 @@ pub fn read_file(world: WorldToken, handle: &FileHandle, size: usize)
     }
 }
 
-/// Write a string to a file. Returns WorldToken.
 pub fn write_file(world: WorldToken, handle: &FileHandle, data: &str) -> WorldToken {
     let c_data = CString::new(data).unwrap();
     unsafe { world_write_file(handle.0, c_data.as_ptr()); }
+    world
+}
+
+// ========== Memory ==========
+#[derive(Debug)]
+pub struct MemPtr(pub *mut std::ffi::c_void);
+
+unsafe impl Send for MemPtr {}
+unsafe impl Sync for MemPtr {}
+
+/// Allocate `size` bytes. Returns (WorldToken, MemPtr).
+pub fn alloc(world: WorldToken, _mem: &MemToken, size: usize) -> (WorldToken, MemPtr) {
+    let ptr = unsafe { world_alloc(size) };
+    (world, MemPtr(ptr))
+}
+
+/// Free a previously allocated pointer. Returns WorldToken.
+pub fn free(world: WorldToken, ptr: MemPtr) -> WorldToken {
+    unsafe { world_free(ptr.0); }
     world
 }

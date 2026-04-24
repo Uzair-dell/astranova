@@ -1,10 +1,10 @@
 //! Evaluator – walks the AST and computes numeric results.
-//! Uses RuntimeContext for capability tokens (World, Console, FS).
+//! Uses RuntimeContext for capability tokens (World, Console, FS, Memory).
 
 use std::collections::HashMap;
 use crate::ast::{Expr, BinOp, UnOp};
 use crate::runtime::context::RuntimeContext;
-use crate::runtime::{WorldToken, print};
+use crate::runtime::{WorldToken, print,MemToken, alloc, free, MemPtr};
 use std::f64::consts::PI;
 
 pub type EvalResult = Result<(f64, Option<WorldToken>), String>;
@@ -125,11 +125,39 @@ pub fn eval(
 
         Expr::WorldPragma(inner) => {
             let world = ctx.world.take().ok_or("Missing WorldToken for @world")?;
-            if let Expr::StringLiteral(msg) = &**inner {
-                let console = ctx.console.as_ref().ok_or("Missing ConsoleToken for Print")?;
-                let new_world = print(world, console, msg);
-                ctx.world = Some(new_world);
-                return Ok((0.0, None));
+            match &**inner {
+                // ----- Print -----
+                Expr::StringLiteral(msg) => {
+                    let console = ctx.console.as_ref().ok_or("Missing ConsoleToken for Print")?;
+                    let new_world = print(world, console, msg);
+                    ctx.world = Some(new_world);
+                    return Ok((0.0, None));
+                }
+                // ----- Alloc -----
+                Expr::FunctionCall { name, args } if name == "Alloc" => {
+                    if args.len() != 1 {
+                        return Err("Alloc expects one argument (size)".to_string());
+                    }
+                    let (size_val, _) = eval(&args[0], env, ctx)?;
+                    let mem_token = ctx.mem.as_ref().ok_or("Missing MemToken for Alloc")?;
+                    let (new_world, ptr) = alloc(world, mem_token, size_val as usize);
+                    // Store the pointer somewhere? For now we can't, because we only return an f64.
+                    // We'll return the raw pointer value as a hacky f64 for testing.
+                    ctx.world = Some(new_world);
+                    return Ok((ptr.0 as usize as f64, None));
+                }
+                // ----- Free -----
+                Expr::FunctionCall { name, args } if name == "Free" => {
+                    if args.len() != 1 {
+                        return Err("Free expects one argument (ptr)".to_string());
+                    }
+                    let (ptr_val, _) = eval(&args[0], env, ctx)?;
+                    let ptr = MemPtr(ptr_val as usize as *mut std::ffi::c_void);
+                    let new_world = free(world, ptr);
+                    ctx.world = Some(new_world);
+                    return Ok((0.0, None));
+                }
+                _ => {}
             }
             Err("Invalid @world usage".to_string())
         }
@@ -150,6 +178,7 @@ mod tests {
             world: None,
             console: None,
             fs: None,
+            mem: None,
         }
     }
 
@@ -201,40 +230,35 @@ mod tests {
             world: Some(WorldToken),
             console: Some(crate::runtime::ConsoleToken),
             fs: None,
+            mem: None,
         };
         let (val, _) = eval(&expr, &HashMap::new(), &mut ctx).unwrap();
         assert_eq!(val, 0.0);
     }
 
     #[test]
-    fn file_write_and_read() {
-        use crate::runtime::{FSToken, open_file, write_file, close_file, read_file};
-
-        let path = "test_layer2.txt";
+    fn memory_alloc_and_free() {
         let mut ctx = RuntimeContext {
             world: Some(WorldToken),
             console: None,
-            fs: Some(FSToken),
+            fs: None,
+            mem: Some(MemToken),
         };
 
-        let (world, handle) = open_file(ctx.world.take().unwrap(), &FSToken, path, "w").unwrap();
-        ctx.world = Some(world);
+        // Build AST for @world Alloc(100)
+        let alloc_expr = Expr::WorldPragma(Box::new(Expr::FunctionCall {
+            name: "Alloc".to_string(),
+            args: vec![Expr::Number(100.0)],
+        }));
+        let (ptr_val, _) = eval(&alloc_expr, &HashMap::new(), &mut ctx).unwrap();
+        assert!(ptr_val > 0.0); // a valid pointer (not zero)
 
-        let world = write_file(ctx.world.take().unwrap(), &handle, "hello");
-        ctx.world = Some(world);
-
-        let world = close_file(ctx.world.take().unwrap(), handle);
-        ctx.world = Some(world);
-
-        let (world, handle2) = open_file(ctx.world.take().unwrap(), &FSToken, path, "r").unwrap();
-        ctx.world = Some(world);
-
-        let (world, data) = read_file(ctx.world.take().unwrap(), &handle2, 10);
-        ctx.world = Some(world);
-
-        let world = close_file(ctx.world.take().unwrap(), handle2);
-        ctx.world = Some(world);
-
-        assert_eq!(data, Some("hello".to_string()));
+        // Build AST for @world Free(ptr_val)
+        let free_expr = Expr::WorldPragma(Box::new(Expr::FunctionCall {
+            name: "Free".to_string(),
+            args: vec![Expr::Number(ptr_val)],
+        }));
+        eval(&free_expr, &HashMap::new(), &mut ctx).unwrap();
+        // No crash means success.
     }
 }

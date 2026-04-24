@@ -26,3 +26,13 @@ char* world_read_file(FILE* handle, size_t size) {
 void world_write_file(FILE* handle, const char* data) {
     if (handle) fputs(data, handle);
 }
+
+// ---------- Memory operations ----------
+
+void* world_alloc(size_t size) {
+    return malloc(size);
+}
+
+void world_free(void* ptr) {
+    free(ptr);
+}
