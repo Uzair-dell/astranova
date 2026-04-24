@@ -302,6 +302,19 @@ impl Parser {
                 }
             }
             _ => panic!("Unexpected token: {:?}", self.tokens.get(self.pos - 1)),
+                         Token::Parallel => {
+                self.expect(Token::LBrace);
+                let mut exprs = Vec::new();
+                loop {
+                    exprs.push(self.parse_expr(0));
+                    match self.peek() {
+                        Some(Token::Comma) => { self.advance(); }
+                        Some(Token::RBrace) => { self.advance(); break; }
+                        _ => { self.advance(); } // be lenient
+                    }
+                }
+                Expr::Parallel(exprs)
+            }
         }
     }
 

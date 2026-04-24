@@ -48,6 +48,7 @@ pub enum Token {
     Prod,
     Int,
     Lim,
+    Parallel,
     CasesBegin,
     CasesEnd,
     Amp,

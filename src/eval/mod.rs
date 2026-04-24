@@ -128,6 +128,20 @@ pub fn eval(
             }
             Err("No case matched".to_string())
         }
+                Expr::Parallel(exprs) => {
+            // For the prototype, evaluate sequentially.
+            // In the future, spawn threads here.
+            let mut results = Vec::new();
+            let mut world = ctx.world.take();
+            for expr in exprs {
+                let (val, w) = eval(expr, env, ctx)?;
+                results.push(val);
+                world = w.or(world);
+            }
+            ctx.world = world;
+            // Placeholder: return the sum of all results.
+            Ok((results.iter().sum::<f64>(), ctx.world.take()))
+        }
 
         Expr::WorldPragma(inner) => {
             let world = ctx.world.take().ok_or("Missing WorldToken for @world")?;
@@ -430,5 +444,24 @@ mod tests {
         let result = eval(&expr, &HashMap::new(), &mut ctx);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("not yet implemented"));
+    }
+        #[test]
+    fn parallel_evaluation() {
+        let expr = Expr::Parallel(vec![
+            Expr::BinaryOp {
+                op: BinOp::Add,
+                left: Box::new(Expr::Number(1.0)),
+                right: Box::new(Expr::Number(2.0)),
+            },
+            Expr::BinaryOp {
+                op: BinOp::Mul,
+                left: Box::new(Expr::Number(3.0)),
+                right: Box::new(Expr::Number(4.0)),
+            },
+            Expr::Number(5.0),
+        ]);
+        let mut ctx = default_ctx();
+        let (result, _) = eval(&expr, &HashMap::new(), &mut ctx).unwrap();
+        assert_eq!(result, 1.0+2.0 + 3.0*4.0 + 5.0);
     }
 }

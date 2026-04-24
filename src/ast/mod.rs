@@ -126,6 +126,9 @@ pub enum Expr {
     /// Homogeneous list
     List(Vec<Expr>),
 
+        /// Parallel evaluation: each sub‑expression is computed concurrently.
+    Parallel(Vec<Expr>),
+
     /// A side‑effecting world interaction, @world expr
     WorldPragma(Box<Expr>),
 }

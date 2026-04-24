@@ -70,6 +70,15 @@ pub fn infer(expr: &Expr, env: &HashMap<String, Type>) -> Result<Type, String> {
         Expr::List(_) => Err("Lists are not yet fully typed".to_string()),
 
         Expr::WorldPragma(_) => Ok(Type::Scalar(None)),
+                Expr::Parallel(exprs) => {
+            // For now, we don't type‑check parallel expressions deeply.
+            // In the future they will produce a product type.
+            if exprs.is_empty() {
+                Ok(Type::Scalar(None))
+            } else {
+                infer(&exprs[0], env)
+            }
+        }
 
         Expr::FunctionCall { name, args } => {
             if name == "Reject" {
