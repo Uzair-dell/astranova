@@ -101,3 +101,8 @@ pub fn free(world: WorldToken, ptr: MemPtr) -> WorldToken {
     unsafe { world_free(ptr.0); }
     world
 }
+
+/// The un-rejectable sovereign identity (𝕌).
+/// Only the kernel can create this token; user code cannot.
+#[derive(Debug, Clone)]
+pub struct SovereignToken;

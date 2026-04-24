@@ -1,10 +1,16 @@
 //! Evaluator – walks the AST and computes numeric results.
-//! Uses RuntimeContext for capability tokens (World, Console, FS, Memory).
+//! Layer 4: Sovereign ring bypasses all privilege checks.
 
 use std::collections::HashMap;
 use crate::ast::{Expr, BinOp, UnOp};
 use crate::runtime::context::RuntimeContext;
-use crate::runtime::{WorldToken, print,MemToken, alloc, free, MemPtr};
+use crate::runtime::{
+    WorldToken,
+    ConsoleToken,
+    MemToken,
+    print,
+    alloc, free, MemPtr,
+};
 use std::f64::consts::PI;
 
 pub type EvalResult = Result<(f64, Option<WorldToken>), String>;
@@ -123,30 +129,47 @@ pub fn eval(
             Err("No case matched".to_string())
         }
 
+        // ---- World actions with sovereign bypass ----
         Expr::WorldPragma(inner) => {
             let world = ctx.world.take().ok_or("Missing WorldToken for @world")?;
+            let sovereign = ctx.sovereign.is_some();
+
             match &**inner {
-                // ----- Print -----
+                // ---- Print ----
                 Expr::StringLiteral(msg) => {
-                    let console = ctx.console.as_ref().ok_or("Missing ConsoleToken for Print")?;
-                    let new_world = print(world, console, msg);
+                    let console = if sovereign {
+                        ConsoleToken   // sovereign doesn't need a stored token
+                    } else {
+                        ctx.console.take().ok_or("Missing ConsoleToken for Print")?
+                    };
+                    let new_world = print(world, &console, msg);
                     ctx.world = Some(new_world);
-                    return Ok((0.0, None));
+                    if !sovereign {
+                        ctx.console = Some(console);  // return the token to context
+                    }
+                    Ok((0.0, None))
                 }
-                // ----- Alloc -----
+
+                // ---- Alloc ----
                 Expr::FunctionCall { name, args } if name == "Alloc" => {
                     if args.len() != 1 {
                         return Err("Alloc expects one argument (size)".to_string());
                     }
                     let (size_val, _) = eval(&args[0], env, ctx)?;
-                    let mem_token = ctx.mem.as_ref().ok_or("Missing MemToken for Alloc")?;
-                    let (new_world, ptr) = alloc(world, mem_token, size_val as usize);
-                    // Store the pointer somewhere? For now we can't, because we only return an f64.
-                    // We'll return the raw pointer value as a hacky f64 for testing.
+                    let mem = if sovereign {
+                        MemToken
+                    } else {
+                        ctx.mem.take().ok_or("Missing MemToken for Alloc")?
+                    };
+                    let (new_world, ptr) = alloc(world, &mem, size_val as usize);
                     ctx.world = Some(new_world);
-                    return Ok((ptr.0 as usize as f64, None));
+                    if !sovereign {
+                        ctx.mem = Some(mem);
+                    }
+                    Ok((ptr.0 as usize as f64, None))
                 }
-                // ----- Free -----
+
+                // ---- Free ----
                 Expr::FunctionCall { name, args } if name == "Free" => {
                     if args.len() != 1 {
                         return Err("Free expects one argument (ptr)".to_string());
@@ -155,11 +178,11 @@ pub fn eval(
                     let ptr = MemPtr(ptr_val as usize as *mut std::ffi::c_void);
                     let new_world = free(world, ptr);
                     ctx.world = Some(new_world);
-                    return Ok((0.0, None));
+                    Ok((0.0, None))
                 }
-                _ => {}
+
+                _ => Err("Invalid @world usage".to_string()),
             }
-            Err("Invalid @world usage".to_string())
         }
 
         _ => Err(format!("Evaluation not supported for {:?}", expr)),
@@ -172,6 +195,7 @@ mod tests {
     use crate::lexer::lex;
     use crate::parser::Parser;
     use crate::ast::Definition;
+    use crate::runtime::SovereignToken;
 
     fn default_ctx() -> RuntimeContext {
         RuntimeContext {
@@ -179,6 +203,7 @@ mod tests {
             console: None,
             fs: None,
             mem: None,
+            sovereign: None,
         }
     }
 
@@ -228,12 +253,47 @@ mod tests {
         let expr = Expr::WorldPragma(Box::new(Expr::StringLiteral("Hello, Astranova!".to_string())));
         let mut ctx = RuntimeContext {
             world: Some(WorldToken),
-            console: Some(crate::runtime::ConsoleToken),
+            console: Some(ConsoleToken),
             fs: None,
             mem: None,
+            sovereign: None,
         };
         let (val, _) = eval(&expr, &HashMap::new(), &mut ctx).unwrap();
         assert_eq!(val, 0.0);
+    }
+
+    #[test]
+    fn file_write_and_read() {
+        use crate::runtime::{FSToken, open_file, write_file, close_file, read_file};
+
+        let path = "test_layer2.txt";
+        let mut ctx = RuntimeContext {
+            world: Some(WorldToken),
+            console: None,
+            fs: Some(FSToken),
+            mem: None,
+            sovereign: None,
+        };
+
+        let (world, handle) = open_file(ctx.world.take().unwrap(), &FSToken, path, "w").unwrap();
+        ctx.world = Some(world);
+
+        let world = write_file(ctx.world.take().unwrap(), &handle, "hello");
+        ctx.world = Some(world);
+
+        let world = close_file(ctx.world.take().unwrap(), handle);
+        ctx.world = Some(world);
+
+        let (world, handle2) = open_file(ctx.world.take().unwrap(), &FSToken, path, "r").unwrap();
+        ctx.world = Some(world);
+
+        let (world, data) = read_file(ctx.world.take().unwrap(), &handle2, 10);
+        ctx.world = Some(world);
+
+        let world = close_file(ctx.world.take().unwrap(), handle2);
+        ctx.world = Some(world);
+
+        assert_eq!(data, Some("hello".to_string()));
     }
 
     #[test]
@@ -243,22 +303,54 @@ mod tests {
             console: None,
             fs: None,
             mem: Some(MemToken),
+            sovereign: None,
         };
-
-        // Build AST for @world Alloc(100)
         let alloc_expr = Expr::WorldPragma(Box::new(Expr::FunctionCall {
             name: "Alloc".to_string(),
             args: vec![Expr::Number(100.0)],
         }));
         let (ptr_val, _) = eval(&alloc_expr, &HashMap::new(), &mut ctx).unwrap();
-        assert!(ptr_val > 0.0); // a valid pointer (not zero)
-
-        // Build AST for @world Free(ptr_val)
+        assert!(ptr_val > 0.0);
         let free_expr = Expr::WorldPragma(Box::new(Expr::FunctionCall {
             name: "Free".to_string(),
             args: vec![Expr::Number(ptr_val)],
         }));
         eval(&free_expr, &HashMap::new(), &mut ctx).unwrap();
-        // No crash means success.
+    }
+
+    #[test]
+    fn sovereign_can_print_without_console_token() {
+        let mut ctx = RuntimeContext {
+            world: Some(WorldToken),
+            console: None,                     // no console token
+            fs: None,
+            mem: None,
+            sovereign: Some(SovereignToken),   // but we have sovereign
+        };
+        let expr = Expr::WorldPragma(Box::new(Expr::StringLiteral("Hello from sovereign!".to_string())));
+        let (val, _) = eval(&expr, &HashMap::new(), &mut ctx).unwrap();
+        assert_eq!(val, 0.0);
+    }
+
+    #[test]
+    fn sovereign_can_alloc_without_mem_token() {
+        let mut ctx = RuntimeContext {
+            world: Some(WorldToken),
+            console: None,
+            fs: None,
+            mem: None,                         // no mem token
+            sovereign: Some(SovereignToken),
+        };
+        let alloc_expr = Expr::WorldPragma(Box::new(Expr::FunctionCall {
+            name: "Alloc".to_string(),
+            args: vec![Expr::Number(50.0)],
+        }));
+        let (ptr_val, _) = eval(&alloc_expr, &HashMap::new(), &mut ctx).unwrap();
+        assert!(ptr_val > 0.0);
+        let free_expr = Expr::WorldPragma(Box::new(Expr::FunctionCall {
+            name: "Free".to_string(),
+            args: vec![Expr::Number(ptr_val)],
+        }));
+        eval(&free_expr, &HashMap::new(), &mut ctx).unwrap();
     }
 }
