@@ -1,0 +1,8 @@
+\let classify(age) = \begin{cases}
+    1 & age \ge 18 \\
+    0 & age < 18
+\end{cases}
+\let adult = classify(20)
+\let child = classify(10)
+@world Print(adult)
+@world Print(child)

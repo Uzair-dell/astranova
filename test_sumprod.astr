@@ -1,0 +1,4 @@
+\let sum_i = \sum_{i=1}^{10} i
+\let product_i = \prod_{i=1}^{5} i
+@world Print(sum_i)
+@world Print(product_i)

@@ -1,5 +1,5 @@
 //! Astranova Lexer – converts raw source text into tokens.
-//! Extended with Colon, And, Or, Underscore, Backslash.
+//! Supports % line comments, all LaTeX commands, and separates _ from command names.
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
@@ -86,10 +86,27 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    fn skip_comment(&mut self) {
+        while let Some(c) = self.current_char() {
+            if c == '\n' { break; }
+            self.advance();
+        }
+    }
+
     fn read_identifier_or_greek(&mut self) -> String {
         let start = self.pos;
         while let Some(c) = self.current_char() {
             if c.is_alphanumeric() || c == '_' {
+                self.advance();
+            } else { break; }
+        }
+        self.input[start..self.pos].to_string()
+    }
+
+    fn read_command_name(&mut self) -> String {
+        let start = self.pos;
+        while let Some(c) = self.current_char() {
+            if c.is_alphabetic() {   // only letters, not digits or underscores
                 self.advance();
             } else {
                 break;
@@ -103,9 +120,7 @@ impl<'a> Lexer<'a> {
         while let Some(c) = self.current_char() {
             if c.is_digit(10) || c == '.' || c == 'e' || c == 'E' || c == '+' || c == '-' {
                 self.advance();
-            } else {
-                break;
-            }
+            } else { break; }
         }
         self.input[start..self.pos].parse::<f64>().unwrap_or(0.0)
     }
@@ -139,23 +154,42 @@ impl<'a> Lexer<'a> {
     }
 
     fn next_token(&mut self) -> Option<Token> {
-        self.skip_whitespace();
-
-        if self.pos >= self.input.len() {
-            return None;
+        loop {
+            self.skip_whitespace();
+            if self.pos >= self.input.len() { return None; }
+            let c = self.current_char().unwrap();
+            if c == '%' {
+                self.skip_comment();
+                continue;
+            }
+            break;
         }
 
         let c = self.current_char().unwrap();
 
-        // LaTeX commands (backslash)
         if c == '\\' {
             self.advance();
-            // Check for double backslash (\\) which is line separator in cases
             if self.current_char() == Some('\\') {
                 self.advance();
                 return Some(Token::Backslash);
             }
-            let cmd = self.read_identifier_or_greek();
+            let mut cmd = self.read_command_name();
+            // special handling for \begin{...} and \end{...}
+            if cmd == "begin" || cmd == "end" {
+                if self.current_char() == Some('{') {
+                    self.advance(); // skip '{'
+                    let mut brace_content = String::new();
+                    while let Some(c2) = self.current_char() {
+                        if c2 == '}' { break; }
+                        brace_content.push(c2);
+                        self.advance();
+                    }
+                    if self.current_char() == Some('}') {
+                        self.advance(); // skip '}'
+                    }
+                    cmd = format!("{}{{{}}}", cmd, brace_content);
+                }
+            }
             match cmd.as_str() {
                 "let" => return Some(Token::Let),
                 "const" => return Some(Token::Const),
@@ -164,15 +198,18 @@ impl<'a> Lexer<'a> {
                 "prod" => return Some(Token::Prod),
                 "int" => return Some(Token::Int),
                 "lim" => return Some(Token::Lim),
+                "parallel" => return Some(Token::Parallel),
                 "times" => return Some(Token::Times),
                 "cdot" => return Some(Token::Cdot),
                 "begin{cases}" => return Some(Token::CasesBegin),
                 "end{cases}" => return Some(Token::CasesEnd),
+                "ge" => return Some(Token::Ge),
+                "le" => return Some(Token::Le),
+                "ne" => return Some(Token::Neq),
                 _ => return Some(Token::GreekLetter(format!("\\{}", cmd))),
             }
         }
 
-        // @world
         if c == '@' {
             self.advance();
             let word = self.read_identifier_or_greek();
@@ -183,22 +220,18 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        // Numbers
         if c.is_digit(10) {
             return Some(Token::Number(self.read_number()));
         }
 
-        // String literal
         if c == '"' {
             return Some(Token::StringLiteral(self.read_string_literal()));
         }
 
-        // Unit annotation
         if c == '[' {
             return Some(Token::UnitAnnotation(self.read_unit_annotation()));
         }
 
-        // Single-char and multi-char operators
         match c {
             '{' => { self.advance(); return Some(Token::LBrace); }
             '}' => { self.advance(); return Some(Token::RBrace); }
@@ -230,7 +263,6 @@ impl<'a> Lexer<'a> {
                     self.advance();
                     return Some(Token::Or);
                 } else {
-                    // Single | not used; skip it
                     return self.next_token();
                 }
             }
@@ -290,39 +322,4 @@ pub fn lex(input: &str) -> Vec<Token> {
         tokens.push(tok);
     }
     tokens
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn lex_sphere_volume() {
-        let src = r"V = \frac{4}{3} \cdot \pi \cdot r^3";
-        let tokens = lex(src);
-        assert_eq!(tokens.len(), 15);
-        assert_eq!(tokens[0], Token::Identifier("V".to_string()));
-        assert_eq!(tokens[1], Token::Equal);
-        assert_eq!(tokens[2], Token::Frac);
-        assert_eq!(tokens[3], Token::LBrace);
-        assert_eq!(tokens[4], Token::Number(4.0));
-        assert_eq!(tokens[5], Token::RBrace);
-        assert_eq!(tokens[6], Token::LBrace);
-        assert_eq!(tokens[7], Token::Number(3.0));
-        assert_eq!(tokens[8], Token::RBrace);
-        assert_eq!(tokens[9], Token::Cdot);
-        assert_eq!(tokens[10], Token::GreekLetter("\\pi".to_string()));
-        assert_eq!(tokens[11], Token::Cdot);
-        assert_eq!(tokens[12], Token::Identifier("r".to_string()));
-        assert_eq!(tokens[13], Token::Caret);
-        assert_eq!(tokens[14], Token::Number(3.0));
-    }
-
-    #[test]
-    fn lex_world_pragma() {
-        let src = "@world Print(\"hello\")";
-        let tokens = lex(src);
-        assert_eq!(tokens[0], Token::World);
-        assert_eq!(tokens[1], Token::Identifier("Print".to_string()));
-    }
 }

@@ -1,0 +1,7 @@
+\let pi = \pi
+\let tau = \tau
+\let phi = \phi
+\let radius = 5.0
+\let volume = \frac{4}{3} \cdot \pi \cdot radius^3
+@world Print(volume)
+@world Print(pi)

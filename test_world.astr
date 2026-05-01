@@ -1,0 +1,3 @@
+@world "Hello, World!"
+\let x = 42
+@world Print(x)
