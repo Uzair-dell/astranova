@@ -1,9 +1,8 @@
 //! Astranova Parser – converts a token stream into an AST.
-//!
-//! Recursive descent implementation following the grammar in
-//! `docs/spec/01_syntax.ebnf`.
+//! Full support for function calls, parallel, and all primitive types.
+//! Added: unary minus/plus prefix, optional superscript for Sum/Prod.
 
-use crate::ast::{BinOp, Definition, Expr, Type};
+use crate::ast::{BinOp, Definition, Expr, Type, UnOp};
 use crate::lexer::Token;
 
 pub struct Parser {
@@ -58,11 +57,29 @@ impl Parser {
             Some(Token::Let) => self.parse_let(),
             Some(Token::Const) => self.parse_const(),
             Some(Token::World) => {
-                let expr = self.parse_world();
+                self.advance(); // consume '@world'
+                let inner = match self.peek() {
+                    Some(Token::StringLiteral(s)) => {
+                        let msg = s.clone();
+                        self.advance();
+                        Expr::StringLiteral(msg)
+                    }
+                    Some(Token::Identifier(id)) if id == "Print" => {
+                        self.advance();
+                        self.expect(Token::LParen);
+                        let expr = self.parse_expr(0);
+                        self.expect(Token::RParen);
+                        Expr::FunctionCall {
+                            name: "Print".to_string(),
+                            args: vec![expr],
+                        }
+                    }
+                    _ => panic!("Expected a string or Print(expr) after @world"),
+                };
                 Definition::Let {
                     name: "@world".to_string(),
                     params: vec![],
-                    body: expr,
+                    body: Expr::WorldPragma(Box::new(inner)),
                 }
             }
             other => panic!("Expected a definition, found {:?}", other),
@@ -158,7 +175,18 @@ impl Parser {
     // ---------- Expressions (precedence climbing) ----------
 
     fn parse_expr(&mut self, min_prec: u8) -> Expr {
-        let mut left = self.parse_primary();
+        // Handle prefix unary operators
+        let mut left = match self.peek() {
+            Some(Token::Minus) => {
+                self.advance();
+                Expr::UnaryOp { op: UnOp::Neg, operand: Box::new(self.parse_primary()) }
+            }
+            Some(Token::Plus) => {
+                self.advance();
+                Expr::UnaryOp { op: UnOp::Pos, operand: Box::new(self.parse_primary()) }
+            }
+            _ => self.parse_primary(),
+        };
 
         while let Some(token) = self.peek() {
             let op = match token {
@@ -195,11 +223,44 @@ impl Parser {
         left
     }
 
-       fn parse_primary(&mut self) -> Expr {
+
+    fn parse_primary(&mut self) -> Expr {
         match self.advance().clone() {
             Token::Number(n) => Expr::Number(n),
-            Token::Identifier(s) => Expr::Variable(s),
-            Token::GreekLetter(g) => Expr::GreekLetter(g),
+                        Token::Identifier(s) => {
+                if self.peek() == Some(&Token::LParen) {
+                    self.advance(); // consume '('
+                    let mut args = Vec::new();
+                    loop {
+                        args.push(self.parse_expr(0));
+                        match self.peek() {
+                            Some(Token::Comma) => { self.advance(); }
+                            Some(Token::RParen) => { self.advance(); break; }
+                            _ => { self.advance(); } // lenient
+                        }
+                    }
+                    Expr::FunctionCall { name: s, args }
+                } else {
+                    Expr::Variable(s)
+                }
+            }
+                       Token::GreekLetter(g) => {
+                if self.peek() == Some(&Token::LParen) {
+                    self.advance(); // consume '('
+                    let mut args = Vec::new();
+                    loop {
+                        args.push(self.parse_expr(0));
+                        match self.peek() {
+                            Some(Token::Comma) => { self.advance(); }
+                            Some(Token::RParen) => { self.advance(); break; }
+                            _ => { self.advance(); }
+                        }
+                    }
+                    Expr::FunctionCall { name: g, args }
+                } else {
+                    Expr::GreekLetter(g)
+                }
+            }
             Token::StringLiteral(s) => Expr::StringLiteral(s),
             Token::LParen => {
                 let expr = self.parse_expr(0);
@@ -231,10 +292,16 @@ impl Parser {
                 self.expect(Token::Equal);
                 let start = self.parse_expr(0);
                 self.expect(Token::RBrace);
-                self.expect(Token::Caret);
-                self.expect(Token::LBrace);
-                let end = self.parse_expr(0);
-                self.expect(Token::RBrace);
+                // superscript is optional; default to start (single iteration)
+                let end = if self.peek() == Some(&Token::Caret) {
+                    self.advance();
+                    self.expect(Token::LBrace);
+                    let e = self.parse_expr(0);
+                    self.expect(Token::RBrace);
+                    e
+                } else {
+                    start.clone()
+                };
                 let body = self.parse_expr(0);
                 Expr::Sum {
                     index,
@@ -253,10 +320,15 @@ impl Parser {
                 self.expect(Token::Equal);
                 let start = self.parse_expr(0);
                 self.expect(Token::RBrace);
-                self.expect(Token::Caret);
-                self.expect(Token::LBrace);
-                let end = self.parse_expr(0);
-                self.expect(Token::RBrace);
+                let end = if self.peek() == Some(&Token::Caret) {
+                    self.advance();
+                    self.expect(Token::LBrace);
+                    let e = self.parse_expr(0);
+                    self.expect(Token::RBrace);
+                    e
+                } else {
+                    start.clone()
+                };
                 let body = self.parse_expr(0);
                 Expr::Prod {
                     index,
@@ -288,19 +360,6 @@ impl Parser {
                 }
                 Expr::Cases { branches }
             }
-            Token::World => {
-                let msg = match self.peek() {
-                    Some(Token::StringLiteral(s)) => Some(s.clone()),
-                    _ => None,
-                };
-                match msg {
-                    Some(s) => {
-                        self.advance(); // consume the string token
-                        Expr::WorldPragma(Box::new(Expr::StringLiteral(s)))
-                    }
-                    _ => panic!("Expected a string after @world"),
-                }
-            }
             Token::Parallel => {
                 self.expect(Token::LBrace);
                 let mut exprs = Vec::new();
@@ -309,18 +368,13 @@ impl Parser {
                     match self.peek() {
                         Some(Token::Comma) => { self.advance(); }
                         Some(Token::RBrace) => { self.advance(); break; }
-                        _ => { self.advance(); } // be lenient
+                        _ => { self.advance(); }
                     }
                 }
                 Expr::Parallel(exprs)
             }
             _ => panic!("Unexpected token: {:?}", self.tokens.get(self.pos - 1)),
         }
-    }
-
-    fn parse_world(&mut self) -> Expr {
-        self.expect(Token::World);
-        self.parse_expr(0)
     }
 }
 
