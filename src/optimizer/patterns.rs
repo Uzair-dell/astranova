@@ -4,7 +4,7 @@
 
 use crate::ast::{BinOp, Expr, UnOp};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+
 
 // ---------- intermediate JSON representation ----------
 
@@ -119,6 +119,7 @@ struct PatternFile {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct PatternEntry {
     name: String,
     template: PatternNode,
