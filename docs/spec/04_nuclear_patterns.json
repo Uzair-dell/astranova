@@ -7,7 +7,7 @@
         "index": "i",
         "start": { "node": "Number", "value": 1.0 },
         "end":   { "node": "Variable", "name": "__n" },
-        "body":  { "node": "Variable", "name": "__i" }
+        "body":  { "node": "Variable", "name": "i" }
       },
       "rewrite": {
         "node": "BinaryOp",
@@ -34,10 +34,10 @@
         "start": { "node": "Number", "value": 1.0 },
         "end":   { "node": "Variable", "name": "__n" },
         "body": {
-           "node": "Pow",
-            "base": { "node": "Variable", "name": "__i" },
-           "exp":  { "node": "Number", "value": 2.0 }
-}
+          "node": "Pow",
+          "base": { "node": "Variable", "name": "i" },
+          "exp":  { "node": "Number", "value": 2.0 }
+        }
       },
       "rewrite": {
         "node": "BinaryOp",

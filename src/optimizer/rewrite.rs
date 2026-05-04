@@ -1,98 +1,154 @@
-//! Pattern matching and substitution engine.
+//! Rewrite engine – pattern matching and instantiation.
+//! Matches AST nodes against pattern templates and replaces
+//! placeholder variables (`__name`) with the captured sub‑expressions.
 
+use crate::ast::{BinOp, Expr};
 use std::collections::HashMap;
-use crate::ast::{Expr, BinOp};
-use super::patterns::PatternNode;   // removed Pattern
 
-pub fn match_pattern(template: &PatternNode, expr: &Expr) -> Option<HashMap<String, Expr>> {
-    let mut env = HashMap::new();
-    if match_rec(template, expr, &mut env) {
-        Some(env)
-    } else {
-        None
+pub type Env = HashMap<String, Expr>;
+
+/// Try to match a `template` expression against the actual `target` expression.
+/// Returns a map of placeholder names to matched sub‑expressions, or `None`
+/// if the pattern does not fit.
+pub fn match_pattern(template: &Expr, target: &Expr) -> Option<Env> {
+    match (template, target) {
+        // ---------- Placeholder ----------
+        // Any variable whose name starts with "__" captures whatever appears at that position.
+        (Expr::Variable(name), sub_expr) if name.starts_with("__") => {
+            let mut env = HashMap::new();
+            env.insert(name.clone(), sub_expr.clone());
+            Some(env)
+        }
+
+        // ---------- Literals ----------
+        (Expr::Number(a), Expr::Number(b)) if (a - b).abs() < f64::EPSILON => {
+            Some(HashMap::new())
+        }
+        (Expr::StringLiteral(a), Expr::StringLiteral(b)) if a == b => Some(HashMap::new()),
+        (Expr::Variable(a), Expr::Variable(b)) if a == b => Some(HashMap::new()),
+        (Expr::GreekLetter(a), Expr::GreekLetter(b)) if a == b => Some(HashMap::new()),
+
+        // ---------- BinaryOp ----------
+        (
+            Expr::BinaryOp { op: op_t, left: l_t, right: r_t },
+            Expr::BinaryOp { op: op_a, left: l_a, right: r_a },
+        ) if op_t == op_a => {
+            let env_left = match_pattern(l_t, l_a)?;
+            let env_right = match_pattern(r_t, r_a)?;
+            merge_envs(env_left, env_right)
+        }
+
+        // ---------- Sum ----------
+        (
+            Expr::Sum {
+                index: idx_t,
+                start: s_t,
+                end: e_t,
+                body: b_t,
+            },
+            Expr::Sum {
+                index: idx_a,
+                start: s_a,
+                end: e_a,
+                body: b_a,
+            },
+        ) if idx_t == idx_a => {
+            let env_start = match_pattern(s_t, s_a)?;
+            let env_end = match_pattern(e_t, e_a)?;
+            let env_body = match_pattern(b_t, b_a)?;
+            let env = merge_envs(env_start, env_end)?;
+            merge_envs(env, env_body)
+        }
+
+        // ---------- Pow (e.g. i^2) ----------
+        (Expr::Pow { base: b_t, exp: e_t }, Expr::Pow { base: b_a, exp: e_a }) => {
+            let env_base = match_pattern(b_t, b_a)?;
+            let env_exp = match_pattern(e_t, e_a)?;
+            merge_envs(env_base, env_exp)
+        }
+
+        // ---------- UnaryOp (so future patterns can use it) ----------
+        (
+            Expr::UnaryOp {
+                op: op_t,
+                operand: o_t,
+            },
+            Expr::UnaryOp {
+                op: op_a,
+                operand: o_a,
+            },
+        ) if op_t == op_a => match_pattern(o_t, o_a),
+
+        // Everything else fails to match
+        _ => None,
     }
 }
 
-fn match_rec(template: &PatternNode, expr: &Expr, env: &mut HashMap<String, Expr>) -> bool {
-    match (template, expr) {
-        (PatternNode::Number { value: tv }, Expr::Number(n)) => (tv - n).abs() < f64::EPSILON,
-
-        (PatternNode::Variable { name }, Expr::Variable(actual_name)) => {
-            if name.starts_with("__") {
-                if let Some(existing) = env.get(name) {
-                    *existing == Expr::Variable(actual_name.clone())
-                } else {
-                    env.insert(name.clone(), Expr::Variable(actual_name.clone()));
-                    true
-                }
-            } else {
-                name == actual_name
-            }
+/// Replace every placeholder variable in `expr` with the corresponding
+/// sub‑expression from the environment `env`.
+pub fn instantiate(expr: &Expr, env: &Env) -> Expr {
+    match expr {
+        Expr::Variable(name) if name.starts_with("__") => {
+            env.get(name)
+                .cloned()
+                .unwrap_or_else(|| Expr::Number(0.0))
         }
 
-        (PatternNode::Sum { index: ti, start: ts, end: te, body: tb }, Expr::Sum { index: ai, start: a_start, end: a_end, body: a_body }) => {
-            if let Some(existing) = env.get(ti) {
-                if *existing != Expr::Variable(ai.clone()) { return false; }
-            } else {
-                env.insert(ti.clone(), Expr::Variable(ai.clone()));
-            }
-            match_rec(ts, a_start, env) && match_rec(te, a_end, env) && match_rec(tb, a_body, env)
-        }
+        Expr::BinaryOp { op, left, right } => Expr::BinaryOp {
+            op: *op,
+            left: Box::new(instantiate(left, env)),
+            right: Box::new(instantiate(right, env)),
+        },
 
-        (PatternNode::BinaryOp { op: top, left: tl, right: tr }, Expr::BinaryOp { op: aop, left: al, right: ar }) => {
-            let op_str = binop_to_str(aop);
-            if top != &op_str { return false; }
-            match_rec(tl, al, env) && match_rec(tr, ar, env)
-        }
+        Expr::Sum {
+            index,
+            start,
+            end,
+            body,
+        } => Expr::Sum {
+            index: index.clone(),
+            start: Box::new(instantiate(start, env)),
+            end: Box::new(instantiate(end, env)),
+            body: Box::new(instantiate(body, env)),
+        },
 
-        (PatternNode::Pow { base: tb, exp: te }, Expr::Pow { base: ab, exp: ae }) => {
-            match_rec(tb, ab, env) && match_rec(te, ae, env)
-        }
+        Expr::Pow { base, exp } => Expr::Pow {
+            base: Box::new(instantiate(base, env)),
+            exp: Box::new(instantiate(exp, env)),
+        },
 
-        (PatternNode::Variable { name }, other) if name.starts_with("__") => {
-            if let Some(existing) = env.get(name) {
-                *existing == other.clone()
-            } else {
-                env.insert(name.clone(), other.clone());
-                true
-            }
-        }
+        Expr::UnaryOp { op, operand } => Expr::UnaryOp {
+            op: *op,
+            operand: Box::new(instantiate(operand, env)),
+        },
 
-        _ => false,
+        // For all other variants there is nothing to substitute
+        other => other.clone(),
     }
 }
 
-pub fn instantiate(node: &PatternNode, env: &HashMap<String, Expr>) -> Expr {
-    match node {
-        PatternNode::Number { value } => Expr::Number(*value),
-        PatternNode::Variable { name } => {
-            if let Some(expr) = env.get(name) {
-                expr.clone()
-            } else {
-                Expr::Variable(name.clone())
+/// Merge two environments. If a placeholder appears in both, the captured
+/// expressions must be identical – otherwise the match fails.
+fn merge_envs(mut a: Env, b: Env) -> Option<Env> {
+    for (k, v) in b {
+        if let Some(existing) = a.get(&k) {
+            if existing != &v {
+                return None;
             }
+        } else {
+            a.insert(k, v);
         }
-        PatternNode::BinaryOp { op, left, right } => {
-            let left = Box::new(instantiate(left, env));
-            let right = Box::new(instantiate(right, env));
-            let op = str_to_binop(op);
-            Expr::BinaryOp { op, left, right }
-        }
-        PatternNode::Frac { num, den } => {
-            let num = Box::new(instantiate(num, env));
-            let den = Box::new(instantiate(den, env));
-            Expr::Frac { num, den }
-        }
-        PatternNode::Pow { base, exp } => {
-            let base = Box::new(instantiate(base, env));
-            let exp = Box::new(instantiate(exp, env));
-            Expr::Pow { base, exp }
-        }
-        _ => panic!("Unsupported pattern node in rewrite: {:?}", node),
     }
+    Some(a)
 }
 
-fn binop_to_str(op: &BinOp) -> String {
+// ---------------------------------------------------------------------------
+// Helper routines for the JSON ↔ AST path (used by patterns.rs).
+// These convert between the string representations stored in the JSON file
+// and the Rust BinOp / UnOp enums.
+// ---------------------------------------------------------------------------
+
+pub fn binop_to_str(op: &BinOp) -> String {
     match op {
         BinOp::Add => "+".into(),
         BinOp::Sub => "-".into(),
@@ -103,7 +159,7 @@ fn binop_to_str(op: &BinOp) -> String {
     }
 }
 
-fn str_to_binop(s: &str) -> BinOp {
+pub fn str_to_binop(s: &str) -> BinOp {
     match s {
         "+" | "Add" => BinOp::Add,
         "-" | "Sub" => BinOp::Sub,

@@ -112,4 +112,78 @@ mod tests {
             _ => panic!("Expected Div"),
         }
     }
+    #[test]
+fn sum_of_squares_direct_pattern() {
+    // Build the same AST as the other sum-of-squares test
+    let sum = Expr::Sum {
+        index: "i".to_string(),
+        start: Box::new(Expr::Number(1.0)),
+        end:   Box::new(Expr::Variable("n".to_string())),
+        body:  Box::new(Expr::Pow {
+            base: Box::new(Expr::Variable("i".to_string())),
+            exp:  Box::new(Expr::Number(2.0)),
+        }),
+    };
+
+    // Construct the sum-of-squares pattern WITHOUT using the JSON file
+    let template = Expr::Sum {
+        index: "i".to_string(),
+        start: Box::new(Expr::Number(1.0)),
+        end:   Box::new(Expr::Variable("__n".to_string())),
+        body:  Box::new(Expr::Pow {
+            base: Box::new(Expr::Variable("i".to_string())),
+            exp:  Box::new(Expr::Number(2.0)),
+        }),
+    };
+    let rewrite = Expr::BinaryOp {
+        op: BinOp::Div,
+        left: Box::new(Expr::BinaryOp {
+            op: BinOp::Mul,
+            left: Box::new(Expr::BinaryOp {
+                op: BinOp::Mul,
+                left:  Box::new(Expr::Variable("__n".to_string())),
+                right: Box::new(Expr::BinaryOp {
+                    op: BinOp::Add,
+                    left:  Box::new(Expr::Variable("__n".to_string())),
+                    right: Box::new(Expr::Number(1.0)),
+                }),
+            }),
+            right: Box::new(Expr::BinaryOp {
+                op: BinOp::Add,
+                left: Box::new(Expr::BinaryOp {
+                    op: BinOp::Mul,
+                    left:  Box::new(Expr::Number(2.0)),
+                    right: Box::new(Expr::Variable("__n".to_string())),
+                }),
+                right: Box::new(Expr::Number(1.0)),
+            }),
+        }),
+        right: Box::new(Expr::Number(6.0)),
+    };
+    let pattern = crate::optimizer::patterns::Pattern { template, rewrite };
+
+    // Apply the pattern directly
+    let mut patterns = vec![pattern];
+    let result = super::rewrite_expr(&sum, &patterns);
+
+    // Verify it's a division
+    match result {
+        Expr::BinaryOp { op, .. } => {
+            assert_eq!(op, BinOp::Div, "Expected Div, got {:?}", op);
+        }
+        _ => panic!("Expected a BinaryOp, got {:?}", result),
+    }
+}   
+#[test]
+fn debug_loaded_patterns() {
+    let patterns = crate::optimizer::patterns::load_patterns();
+    for (i, p) in patterns.iter().enumerate() {
+        println!("Pattern {}: template = {:#?}", i, p.template);
+        println!("Pattern {}: rewrite  = {:#?}", i, p.rewrite);
+    }
+    // force a failure so we see the output
+    panic!("Debug output – check the test log");
+}
+
+
 }
