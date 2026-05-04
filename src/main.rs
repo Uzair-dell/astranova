@@ -6,7 +6,8 @@ use astranovac::parser::Parser;
 use astranovac::codegen::Codegen;
 use astranovac::typecheck::{TypeEnv, TokenEnv, FnEnv, infer_definition};
 use astranovac::ast::Definition;
-
+use astranovac::optimizer;
+use astranovac::ast::Definition;
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 3 {
@@ -73,6 +74,15 @@ fn main() {
     for def in &program {
         if let Err(e) = infer_definition(def, &mut env, &tokens, &mut fns) {
             panic!("Type error: {:?}", e);
+        }
+    }
+        // Nuclear Optimizer pass
+    use astranovac::optimizer;
+    use astranovac::ast::Definition;
+    for def in &mut program {
+        match def {
+            Definition::Let { body, .. } => *body = optimizer::optimize(body),
+            Definition::Const { value, .. } => *value = optimizer::optimize(value),
         }
     }
 
