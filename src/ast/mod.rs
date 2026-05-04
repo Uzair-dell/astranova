@@ -149,6 +149,22 @@ pub enum Expr {
 
     /// Sequence of expressions, separated by semicolons
     Block(Vec<Expr>),
+    // ---- array support ----
+    /// Allocate a fixed‑size array of numbers: array(n)
+    ArrayAlloc(u32),
+
+    /// Read an element: expr[index]
+    Subscript {
+        array: Box<Expr>,
+        index: Box<Expr>,
+    },
+
+    /// Write an element: array[index] = value
+    SubscriptAssign {
+        array: String,
+        index: Box<Expr>,
+        value: Box<Expr>,
+    },
 }
 
 // ---------- Type nodes ----------
@@ -156,6 +172,7 @@ pub enum Expr {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
     Scalar(Option<Unit>),
+    String,                                
     Vector(usize, Option<Unit>),
     Matrix(usize, usize, Option<Unit>),
     Tensor,

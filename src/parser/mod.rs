@@ -1,5 +1,5 @@
 //! Astranova Parser – final production version
-//! Supports assignment, sequencing, and the full language.
+//! Supports assignment, sequencing, subscripts, array allocation, and the full language.
 
 use crate::ast::{BinOp, Definition, Expr, Type, UnOp};
 use crate::lexer::Token;
@@ -39,13 +39,21 @@ impl Parser {
                 Some(Token::Let)   => definitions.push(self.parse_let()),
                 Some(Token::Const) => definitions.push(self.parse_const()),
                 Some(Token::World) => definitions.push(self.parse_world()),
-                // Top‑level expression statements (assignment, sequencing, …)
                                 _ => {
-                    let expr = self.parse_expr(0);
+                    let mut expr = self.parse_expr(0);
+                    // Sequence multiple statements at the top level
+                    if self.peek() == Some(&Token::Semicolon) {
+                        let mut exprs = vec![expr];
+                        while self.peek() == Some(&Token::Semicolon) {
+                            self.advance();
+                            exprs.push(self.parse_expr(0));
+                        }
+                        expr = Expr::Block(exprs);
+                    }
                     definitions.push(Definition::Let {
                         name: String::new(),
                         params: vec![],
-                        is_func: false,    // ← added
+                        is_func: false,
                         body: expr,
                     });
                 }
@@ -66,13 +74,14 @@ impl Parser {
             }
             _ => panic!("Expected string or Print after @world"),
         };
-                Definition::Let {
+        Definition::Let {
             name: "@world".to_string(),
             params: vec![],
-            is_func: false,    // ← added
+            is_func: false,
             body: Expr::WorldPragma(Box::new(inner)),
         }
     }
+
     // -------- \let --------
     fn parse_let(&mut self) -> Definition {
         self.expect(Token::Let);
@@ -85,7 +94,6 @@ impl Parser {
         let params = self.parse_params();
         let is_func = saw_paren;
 
-        // Register function name if it's a function (zero‑ or multi‑parameter)
         if is_func {
             self.function_names.push(name.clone());
         }
@@ -124,6 +132,7 @@ impl Parser {
 
         Definition::Let { name, params, body, is_func }
     }
+
     fn parse_params(&mut self) -> Vec<String> {
         let mut params = Vec::new();
         if let Some(Token::LParen) = self.peek() {
@@ -161,12 +170,36 @@ impl Parser {
     }
 
     fn parse_unit_opt(&mut self) -> Option<crate::ast::Unit> {
-        if let Some(Token::UnitAnnotation(content)) = self.peek() {
-            let c = content.clone(); self.advance();
-            let mut map = std::collections::HashMap::new(); map.insert(c, 1);
-            Some(map)
-        } else { None }
+    if self.peek() == Some(&Token::LSquare) {
+        self.advance(); // consume '['
+        let mut unit_str = String::new();
+        // Read the unit content: one or more identifiers/operators inside brackets
+        while let Some(tok) = self.peek() {
+            match tok {
+                Token::Identifier(s) | Token::GreekLetter(s) => {
+                    unit_str.push_str(s);
+                    self.advance();
+                }
+                Token::RSquare => { break; }
+                Token::Star | Token::Slash | Token::Caret => {
+                    // allow operators inside unit (e.g., m/s, m^2)
+                    unit_str.push(match tok {
+                        Token::Star => '*', Token::Slash => '/', Token::Caret => '^',
+                        _ => unreachable!(),
+                    });
+                    self.advance();
+                }
+                _ => break,
+            }
+        }
+        self.expect(Token::RSquare);
+        let mut map = std::collections::HashMap::new();
+        map.insert(unit_str, 1);
+        Some(map)
+    } else {
+        None
     }
+}
 
     // ---------- expressions ----------
     fn parse_expr(&mut self, min_prec: u8) -> Expr {
@@ -192,26 +225,35 @@ impl Parser {
             left = Expr::BinaryOp { op, left: Box::new(left), right: Box::new(right) };
         }
 
-        // Assignment (lowest precedence, right‑associative)
+        // Post‑subscript: a[i]
+        while self.peek() == Some(&Token::LSquare) {
+            self.advance(); // consume [
+            let index = self.parse_expr(0);
+            self.expect(Token::RSquare);
+            left = Expr::Subscript { array: Box::new(left), index: Box::new(index) };
+        }
+
+        // Assignment (right‑associative)
         if self.peek() == Some(&Token::Equal) {
             self.advance();
             let value = self.parse_expr(0);
-            if let Expr::Variable(var_name) = &left {
-                left = Expr::Assign { var: var_name.clone(), value: Box::new(value) };
-            } else {
-                panic!("Assignment target must be a variable, found {:?}", left);
+            match left {
+                Expr::Subscript { array, index } => {
+                    if let Expr::Variable(var_name) = *array {
+                        left = Expr::SubscriptAssign { array: var_name, index, value: Box::new(value) };
+                    } else {
+                        panic!("Array subscript assignment requires a named variable");
+                    }
+                }
+                Expr::Variable(var_name) => {
+                    left = Expr::Assign { var: var_name, value: Box::new(value) };
+                }
+                _ => panic!("Assignment target must be a variable or subscript, found {:?}", left),
             }
         }
 
-        // Sequencing with semicolons (lowest precedence, left‑associative)
-        while self.peek() == Some(&Token::Semicolon) {
-            self.advance(); // consume ';'
-            let next = self.parse_expr(0);
-            match &mut left {
-                Expr::Block(exprs) => exprs.push(next),
-                _ => left = Expr::Block(vec![left, next]),
-            }
-        }
+        // Sequencing with semicolons (only at the outermost level)
+        
 
         left
     }
@@ -231,6 +273,16 @@ impl Parser {
                 self.expect(Token::LParen); let t = self.parse_expr(0);
                 self.expect(Token::RParen);
                 Expr::FunctionCall { name: "tlen".to_string(), args: vec![t] }
+            }
+            // -------- array allocation: array(n) --------
+            Token::Identifier(s) if s == "array" => {
+                self.expect(Token::LParen);
+                let size = match self.advance() {
+                    Token::Number(n) => *n as u32,
+                    t => panic!("Expected array size, got {:?}", t),
+                };
+                self.expect(Token::RParen);
+                Expr::ArrayAlloc(size)
             }
 
             // -------- function reference / variable / call --------
@@ -319,6 +371,7 @@ impl Parser {
         }
     }
 
+    // -------- \sum & \prod (with semicolon sequencing) --------
     fn parse_sum_prod(&mut self) -> Expr {
         let is_sum = matches!(self.tokens[self.pos-1], Token::Sum);
         self.expect(Token::Underscore); self.expect(Token::LBrace);
@@ -327,16 +380,36 @@ impl Parser {
         let en = if self.peek() == Some(&Token::Caret) {
             self.advance(); self.expect(Token::LBrace); let e = self.parse_expr(0); self.expect(Token::RBrace); e
         } else { st.clone() };
-        let body = self.parse_expr(0);
+        let mut body = self.parse_expr(0);
+
+        // Handle semicolon sequencing inside sum/prod bodies
+        if self.peek() == Some(&Token::Semicolon) {
+            let mut exprs = vec![body];
+            while self.peek() == Some(&Token::Semicolon) {
+                self.advance();
+                exprs.push(self.parse_expr(0));
+            }
+            body = Expr::Block(exprs);
+        }
+
         if is_sum { Expr::Sum { index: idx, start: Box::new(st), end: Box::new(en), body: Box::new(body) } }
         else { Expr::Prod { index: idx, start: Box::new(st), end: Box::new(en), body: Box::new(body) } }
     }
 
-    fn parse_cases(&mut self) -> Expr {
+       fn parse_cases(&mut self) -> Expr {
         let mut branches = Vec::new();
         loop {
             if self.peek() == Some(&Token::CasesEnd) { self.advance(); break; }
-            let value = self.parse_expr(0);
+            // Parse value expression (possibly multiple statements separated by ;)
+            let mut value = self.parse_expr(0);
+            if self.peek() == Some(&Token::Semicolon) {
+                let mut exprs = vec![value];
+                while self.peek() == Some(&Token::Semicolon) {
+                    self.advance();
+                    exprs.push(self.parse_expr(0));
+                }
+                value = Expr::Block(exprs);
+            }
             self.expect(Token::Amp);
             let cond = self.parse_expr(0);
             branches.push((value, cond));

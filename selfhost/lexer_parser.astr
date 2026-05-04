@@ -1,0 +1,129 @@
+% Self‑hosted Astranova Lexer + Parser – type‑check safe ordering
+% Scans "12 + 34 * 2", builds token table, evaluates to 80.
+
+\let source = "12 + 34 * 2"
+\let src_len = length(source)
+
+% ---------- Token type codes ----------
+\let TOK_NUMBER = 2
+\let TOK_PLUS   = 4
+\let TOK_MINUS  = 4
+\let TOK_MUL    = 5
+\let TOK_DIV    = 5
+
+% ---------- Lexer globals ----------
+\let tokens = array(60)
+\let num_tokens = 0
+\let pos = 0
+\let type   = 0
+\let start  = 0
+\let length = 0
+\let end    = 0
+
+% ---------- Character predicates ----------
+\let is_digit(i)   = char_at(source,i) \ge 48 \land char_at(source,i) \le 57
+\let is_space(i)   = char_at(source,i) == 32
+\let is_plus(i)    = char_at(source,i) == 43
+\let is_minus(i)   = char_at(source,i) == 45
+\let is_mul(i)     = char_at(source,i) == 42
+\let is_div(i)     = char_at(source,i) == 47
+
+% ---------- Number‑length helper ----------
+\let num_len(start) = \begin{cases}
+    4 & is_digit(start) \land is_digit(start+1) \land is_digit(start+2) \land is_digit(start+3) \\
+    3 & is_digit(start) \land is_digit(start+1) \land is_digit(start+2) \\
+    2 & is_digit(start) \land is_digit(start+1) \\
+    1 & is_digit(start) \\
+    0 & 1
+\end{cases}
+
+% ---------- Power of 10 helper ----------
+\let power10(n) = \begin{cases}
+    1    & n == 0 \\
+    10   & n == 1 \\
+    100  & n == 2 \\
+    1000 & 1
+\end{cases}
+
+% ---------- LEXER LOOP ----------
+\let dummy1 = \sum_{step=1}^{20}
+    type = \begin{cases}
+        TOK_NUMBER & is_digit(pos)        \land pos < src_len \\
+        TOK_PLUS   & is_plus(pos)         \land pos < src_len \\
+        TOK_MINUS  & is_minus(pos)        \land pos < src_len \\
+        TOK_MUL    & is_mul(pos)          \land pos < src_len \\
+        TOK_DIV    & is_div(pos)          \land pos < src_len \\
+        0          & 1
+    \end{cases} ;
+
+    start = \begin{cases}
+        pos & pos < src_len \\
+        0   & 1
+    \end{cases} ;
+
+    length = \begin{cases}
+        num_len(pos) & is_digit(pos) \\
+        1            & 1
+    \end{cases} ;
+
+    end = start + length ;
+
+    tokens[num_tokens * 3]     = type ;
+    tokens[num_tokens * 3 + 1] = start ;
+    tokens[num_tokens * 3 + 2] = end ;
+
+    num_tokens = num_tokens + 1 ;
+
+    pos = end ;
+    pos = pos + \begin{cases}
+        1 & is_space(pos) \\
+        0 & 1
+    \end{cases} ;
+    0
+
+% ---------- PRECOMPUTE number values ----------
+\let num_values = array(20)
+\let num_start0 = tokens[1]
+\let num_end0   = tokens[2]
+\let num_start2 = tokens[7]
+\let num_end2   = tokens[8]
+\let num_start4 = tokens[13]
+\let num_end4   = tokens[14]
+
+num_values[0] = \sum_{i=num_start0}^{num_end0 - 1} (char_at(source,i) - 48) * power10(num_end0 - i - 1)
+num_values[2] = \sum_{i=num_start2}^{num_end2 - 1} (char_at(source,i) - 48) * power10(num_end2 - i - 1)
+num_values[4] = \sum_{i=num_start4}^{num_end4 - 1} (char_at(source,i) - 48) * power10(num_end4 - i - 1)
+
+% ---------- PARSER (dynamic, guarded) ----------
+\let cur_val = num_values[0]
+\let acc     = 0
+\let op      = 0
+\let next_val = 0
+\let stop    = 0
+
+\let dummy3 = \sum_{i=1}^{10}
+    stop = \begin{cases}
+        1 & i < num_tokens \\
+        0 & 1
+    \end{cases} ;
+    \begin{cases}
+        op = tokens[i * 3] ;
+        next_val = num_values[i + 1] ;
+        acc = acc + \begin{cases}
+            cur_val & op == TOK_PLUS \lor op == TOK_MINUS \\
+            0       & 1
+        \end{cases} ;
+        cur_val = \begin{cases}
+            next_val           & op == TOK_PLUS \lor op == TOK_MINUS \\
+            cur_val * next_val & op == TOK_MUL  \lor op == TOK_DIV \\
+            cur_val            & 1
+        \end{cases} ;
+        0
+        & stop == 1
+    \end{cases} ;
+    0
+
+acc = acc + cur_val
+\let final_result = acc
+
+@world Print(final_result)

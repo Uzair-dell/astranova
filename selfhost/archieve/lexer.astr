@@ -1,0 +1,53 @@
+% Self‑hosted Astranova Lexer – Phase 2.4 (fixed – no \let inside loops)
+% Scans "12 + 34 * 2" and builds a token array.
+
+\let source = "12 + 34 * 2"
+\let src_len = length(source)
+
+% Token type codes
+\let TOK_NUMBER = 2
+\let TOK_PLUS   = 4
+\let TOK_MUL    = 5
+
+% Allocate a token array – 30 slots (10 tokens * 3)
+\let tokens = array(30)
+
+% Global mutable position counter
+\let pos = 0
+
+% Character predicates
+\let is_digit(i) = char_at(source, i) \ge 48 \land char_at(source, i) \le 57
+\let is_space(i) = char_at(source, i) == 32
+\let is_plus(i)  = char_at(source, i) == 43
+\let is_star(i)  = char_at(source, i) == 42
+
+% Main loop – 200 steps, stops processing tokens when pos >= src_len
+\let dummy = \sum_{step=1}^{200}
+    % Record token only if we haven't finished scanning
+    tokens[ (step-1)*3 ] = \begin{cases}
+        TOK_NUMBER & pos < src_len \land is_digit(pos) \\
+        TOK_PLUS   & pos < src_len \land is_plus(pos) \\
+        TOK_MUL    & pos < src_len \land is_star(pos) \\
+        0          & 1
+    \end{cases} ;
+    tokens[ (step-1)*3+1 ] = \begin{cases}
+        pos & pos < src_len \\
+        0   & 1
+    \end{cases} ;
+    tokens[ (step-1)*3+2 ] = \begin{cases}
+        pos + 2 & pos < src_len \land is_digit(pos) \\
+        pos + 1 & pos < src_len \land (is_plus(pos) \lor is_star(pos)) \\
+        0       & 1
+    \end{cases} ;
+    % Advance pos past the token and any following space
+    pos = \begin{cases}
+        pos + 3 & pos < src_len \land is_digit(pos) \\
+        pos + 2 & pos < src_len \land (is_plus(pos) \lor is_star(pos)) \\
+        src_len + 1 & 1
+    \end{cases} ;
+    0
+
+% Print first token to verify
+@world Print(tokens[0])
+@world Print(tokens[1])
+@world Print(tokens[2])

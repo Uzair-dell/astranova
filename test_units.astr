@@ -1,0 +1,4 @@
+\const length : Scalar[m] = 5
+\const time   : Scalar[s] = 3
+\let bogus = length + time
+@world Print(bogus)

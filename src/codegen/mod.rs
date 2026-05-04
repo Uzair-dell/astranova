@@ -1,7 +1,8 @@
 //! C code generator for Astranova.
 //! Produces a .c file that can be compiled with any C compiler.
 //! Handles user‑defined functions, built‑ins, Cases, Assign, Block, and all primitives.
-//! Fixes: global variables, dynamic loop index substitution, string/tuple globals.
+//! Fixes: global variables, dynamic loop index substitution, string/tuple globals,
+//!        constant‑unrolling with full global visibility, array support.
 
 use crate::ast::{BinOp, Definition, Expr, UnOp};
 use std::collections::{HashMap, HashSet};
@@ -14,8 +15,11 @@ pub struct Codegen {
     last_result: Option<String>,
     functions: HashMap<String, (Vec<String>, Expr)>,
     funcrefs: HashMap<String, String>,
-    globals: HashSet<String>,   // names of C global variables
+    globals: HashSet<String>, // names of C global variables
+     arrays: HashSet<String>,
+
 }
+
 
 impl Codegen {
     pub fn new() -> Self {
@@ -27,6 +31,7 @@ impl Codegen {
             functions: HashMap::new(),
             funcrefs: HashMap::new(),
             globals: HashSet::new(),
+            arrays: HashSet::new(),
         }
     }
 
@@ -48,8 +53,8 @@ impl Codegen {
                 } else if !params.is_empty() {
                     // zero‑parameter functions are already handled above
                 } else if !name.is_empty() && name != "@world" {
-                    // Only make it a global if the body is NOT a string literal AND NOT a tuple
-                    if !matches!(body, Expr::StringLiteral(_) | Expr::Tuple(_)) {
+                    // Only make it a global if the body is NOT a string literal AND NOT a tuple AND NOT an array alloc
+                    if !matches!(body, Expr::StringLiteral(_) | Expr::Tuple(_) | Expr::ArrayAlloc(_)) {
                         self.globals.insert(name.clone());
                     }
                 }
@@ -73,8 +78,11 @@ impl Codegen {
                         // top‑level expression statement
                         self.compile_expr(body)?;
                     } else if name != "@world" {
-                        // NEW: treat string literals specially
-                        if let Expr::StringLiteral(s) = body {
+                        // Handle ArrayAlloc specially
+                        if let Expr::ArrayAlloc(size) = body {
+                            writeln!(self.code, "    double {}[{}] = {{0}};", name, size).unwrap();
+                            self.arrays.insert(name.clone());
+                        } else if let Expr::StringLiteral(s) = body {
                             let escaped = format!("\"{}\"", s);
                             self.locals.insert(name.clone(), escaped.clone());
                             self.last_result = Some(escaped);
@@ -121,15 +129,16 @@ impl Codegen {
             Expr::StringLiteral(s) => Ok(format!("\"{}\"", s)),
 
             // ---------- Variable ----------
-            Expr::Variable(name) => {
-                if self.globals.contains(name) {
-                    Ok(name.clone())   // use the C global variable directly
-                } else {
-                    self.locals.get(name).cloned()
-                        .ok_or_else(|| format!("Undefined variable '{}'", name))
-                }
-            }
-
+ Expr::Variable(name) => {
+    if self.globals.contains(name) {
+        Ok(name.clone())
+    } else if self.arrays.contains(name) {
+        Ok(name.clone())   // yes, it's an array – just return its name
+    } else {
+        self.locals.get(name).cloned()
+            .ok_or_else(|| format!("Undefined variable '{}'", name))
+    }
+}
             Expr::GreekLetter(g) => {
                 let val = match g.as_str() {
                     "\\pi" => std::f64::consts::PI,
@@ -236,6 +245,23 @@ impl Codegen {
                 Ok(val)
             }
 
+            // ---------- Subscript Assign ----------
+            Expr::SubscriptAssign { array, index, value } => {
+                let idx = self.compile_expr(index)?;
+                let val = self.compile_expr(value)?;
+                writeln!(self.code, "    {}[(int){}] = {};", array, idx, val).unwrap();
+                Ok(val)
+            }
+
+            // ---------- Subscript ----------
+            Expr::Subscript { array, index } => {
+                let arr_name = self.compile_expr(array)?;
+                let idx = self.compile_expr(index)?;
+                let result = self.fresh("arr");
+                writeln!(self.code, "    double {} = {}[(int){}];", result, arr_name, idx).unwrap();
+                Ok(result)
+            }
+
             Expr::Block(exprs) => {
                 let mut last = String::new();
                 for expr in exprs {
@@ -288,36 +314,46 @@ impl Codegen {
                 Ok(result)
             }
 
-            // ---------- Sum (dynamic loop) ----------
             // ---------- Sum (with constant‑unrolling) ----------
+             // ---------- Sum (with limited constant‑unrolling) ----------
 Expr::Sum { index, start, end, body } => {
     let start_val = self.compile_expr(start)?;
     let end_val = self.compile_expr(end)?;
 
-    // Constant‑unrolling branch
+    // Constant‑unrolling only for tiny loops (≤ 8 iterations)
     if let (Expr::Number(start_n), Expr::Number(end_n)) = (start.as_ref(), end.as_ref()) {
-        let result = self.fresh("sum");
-        writeln!(self.code, "    double {} = 0.0;", result).unwrap();
-        let mut i_val = *start_n;
         let n_iter = (*end_n - *start_n) as i64 + 1;
-        for _ in 0..n_iter {
-            // insert loop index as a temporary double constant
-            let idx = self.fresh("i");
+        if n_iter <= 8 {
+            let result = self.fresh("sum");
+            writeln!(self.code, "    double {} = 0.0;", result).unwrap();
+            let mut i_val = *start_n;
+
+            // Insert loop index and all globals before compiling body
             self.locals.insert(index.clone(), format!("{:.10}", i_val));
-            let body_val = self.compile_expr(body)?;
-            writeln!(self.code, "    {} += {};", result, body_val).unwrap();
-            i_val += 1.0;
+            for g in self.globals.clone() {
+                if !self.locals.contains_key(&g) {
+                    self.locals.insert(g.clone(), g.clone());
+                }
+            }
+
+            for _ in 0..n_iter {
+                let body_val = self.compile_expr(body)?;
+                writeln!(self.code, "    {} += {};", result, body_val).unwrap();
+                i_val += 1.0;
+                self.locals.insert(index.clone(), format!("{:.10}", i_val));
+            }
+            self.locals.remove(index);
+            return Ok(result);
         }
-        self.locals.remove(index);
-        return Ok(result);
     }
 
-    // Dynamic loop branch (unchanged from your current code)
+    // Dynamic loop (for larger or non‑constant bounds)
     let result = self.fresh("sum");
     self.locals.insert(index.clone(), index.clone());
     writeln!(self.code, "    double {} = 0.0;", result).unwrap();
     writeln!(self.code, "    for (int {} = (int)({}); {} <= (int)({}); {}++) {{",
              index, start_val, index, end_val, index).unwrap();
+    // Make all globals visible inside the loop body
     for g in self.globals.clone() {
         if !self.locals.contains_key(&g) {
             self.locals.insert(g.clone(), g.clone());
@@ -330,26 +366,53 @@ Expr::Sum { index, start, end, body } => {
     Ok(result)
 }
 
-            Expr::Prod { index, start, end, body } => {
-                let start_val = self.compile_expr(start)?;
-                let end_val = self.compile_expr(end)?;
-                let result = self.fresh("prod");
-                self.locals.insert(index.clone(), index.clone());
-                writeln!(self.code, "    double {} = 1.0;", result).unwrap();
-                writeln!(self.code, "    for (int {} = (int)({}); {} <= (int)({}); {}++) {{",
-                         index, start_val, index, end_val, index).unwrap();
-                // Make all globals visible inside the loop body
-                for g in self.globals.clone() {
-                    if !self.locals.contains_key(&g) {
-                        self.locals.insert(g.clone(), g.clone());
-                    }
+            // ---------- Prod (with constant‑unrolling) ----------
+            // ---------- Prod (with limited constant‑unrolling) ----------
+Expr::Prod { index, start, end, body } => {
+    let start_val = self.compile_expr(start)?;
+    let end_val = self.compile_expr(end)?;
+
+    if let (Expr::Number(start_n), Expr::Number(end_n)) = (start.as_ref(), end.as_ref()) {
+        let n_iter = (*end_n - *start_n) as i64 + 1;
+        if n_iter <= 8 {
+            let result = self.fresh("prod");
+            writeln!(self.code, "    double {} = 1.0;", result).unwrap();
+            let mut i_val = *start_n;
+
+            self.locals.insert(index.clone(), format!("{:.10}", i_val));
+            for g in self.globals.clone() {
+                if !self.locals.contains_key(&g) {
+                    self.locals.insert(g.clone(), g.clone());
                 }
-                let body_val = self.compile_expr(body)?;
-                writeln!(self.code, "        {} *= {};", result, body_val).unwrap();
-                writeln!(self.code, "    }}").unwrap();
-                self.locals.remove(index);
-                Ok(result)
             }
+
+            for _ in 0..n_iter {
+                let body_val = self.compile_expr(body)?;
+                writeln!(self.code, "    {} *= {};", result, body_val).unwrap();
+                i_val += 1.0;
+                self.locals.insert(index.clone(), format!("{:.10}", i_val));
+            }
+            self.locals.remove(index);
+            return Ok(result);
+        }
+    }
+
+    let result = self.fresh("prod");
+    self.locals.insert(index.clone(), index.clone());
+    writeln!(self.code, "    double {} = 1.0;", result).unwrap();
+    writeln!(self.code, "    for (int {} = (int)({}); {} <= (int)({}); {}++) {{",
+             index, start_val, index, end_val, index).unwrap();
+    for g in self.globals.clone() {
+        if !self.locals.contains_key(&g) {
+            self.locals.insert(g.clone(), g.clone());
+        }
+    }
+    let body_val = self.compile_expr(body)?;
+    writeln!(self.code, "        {} *= {};", result, body_val).unwrap();
+    writeln!(self.code, "    }}").unwrap();
+    self.locals.remove(index);
+    Ok(result)
+}
 
             Expr::Parallel(exprs) => {
                 let result = self.fresh("parallel");

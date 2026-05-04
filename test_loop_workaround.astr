@@ -1,0 +1,4 @@
+\let acc = 0
+\let one = 1
+\let total = \sum_{i=1}^{5} acc = acc + one ; 0
+@world Print(acc)

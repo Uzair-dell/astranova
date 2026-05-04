@@ -104,6 +104,11 @@ pub fn infer(expr: &Expr, env: &HashMap<String, Type>) -> Result<Type, String> {
             }
             Err(format!("Function calls not yet supported: {}", name))
         }
+                
+                // ---- array support ----
+        Expr::ArrayAlloc(_) => unimplemented!("typecheck for ArrayAlloc"),
+        Expr::Subscript { .. } => unimplemented!("typecheck for Subscript"),
+        Expr::SubscriptAssign { .. } => unimplemented!("typecheck for SubscriptAssign"),
     }
 }
 

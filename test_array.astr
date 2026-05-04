@@ -1,0 +1,5 @@
+\let tokens = array(5)
+tokens[0] = 10
+tokens[1] = 20
+@world Print(tokens[0])
+@world Print(tokens[1])

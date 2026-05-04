@@ -13,7 +13,6 @@ pub enum Token {
     World,
     Where,
 
-
     LBrace,
     RBrace,
     LParen,
@@ -25,7 +24,6 @@ pub enum Token {
     Colon,
     Underscore,
     Backslash,
-
 
     Plus,
     Minus,
@@ -44,7 +42,6 @@ pub enum Token {
     And,
     Or,
 
-
     Equal,
 
     Frac,
@@ -58,6 +55,8 @@ pub enum Token {
     Amp,
     Dot,
 
+    // Kept for compatibility; no longer emitted by the lexer.
+    // Unit annotations are now parsed via LSquare/RSquare in the type parser.
     UnitAnnotation(String),
 }
 
@@ -144,20 +143,6 @@ impl<'a> Lexer<'a> {
         "".to_string()
     }
 
-    fn read_unit_annotation(&mut self) -> String {
-        self.advance(); // skip opening '['
-        let start = self.pos;
-        while let Some(c) = self.current_char() {
-            if c == ']' {
-                let s = self.input[start..self.pos].to_string();
-                self.advance(); // skip closing ']'
-                return s;
-            }
-            self.advance();
-        }
-        "".to_string()
-    }
-
     fn next_token(&mut self) -> Option<Token> {
         loop {
             self.skip_whitespace();
@@ -237,16 +222,14 @@ impl<'a> Lexer<'a> {
             return Some(Token::StringLiteral(self.read_string_literal()));
         }
 
-        if c == '[' {
-            return Some(Token::UnitAnnotation(self.read_unit_annotation()));
-        }
-
+        // ---------- main match ----------
         match c {
             '{' => { self.advance(); return Some(Token::LBrace); }
             '}' => { self.advance(); return Some(Token::RBrace); }
             '(' => { self.advance(); return Some(Token::LParen); }
             ')' => { self.advance(); return Some(Token::RParen); }
-            '[' => unreachable!(),
+            // '[' now emits a simple LSquare – the parser handles the content
+            '[' => { self.advance(); return Some(Token::LSquare); }
             ']' => { self.advance(); return Some(Token::RSquare); }
             ',' => { self.advance(); return Some(Token::Comma); }
             ';' => { self.advance(); return Some(Token::Semicolon); }

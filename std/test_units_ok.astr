@@ -1,0 +1,4 @@
+\const length : Scalar[m] = 5
+\const width  : Scalar[m] = 3
+\let area = length * width
+@world Print(area)

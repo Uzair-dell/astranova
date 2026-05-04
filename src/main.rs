@@ -4,6 +4,8 @@ use std::process::Command;
 use astranovac::lexer::lex;
 use astranovac::parser::Parser;
 use astranovac::codegen::Codegen;
+use astranovac::typecheck::{TypeEnv, TokenEnv, FnEnv, infer_definition};
+use astranovac::ast::Definition;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -62,6 +64,18 @@ fn main() {
     let mut parser = Parser::new(tokens);
     let program = parser.parse_program();
 
+    // --- Single type‑check pass (shared between build and run) ---
+    let mut env = TypeEnv::new();
+    let mut tokens = TokenEnv::new();
+    let mut fns = FnEnv::new();
+    tokens.insert("ConsoleToken".to_string());
+
+    for def in &program {
+        if let Err(e) = infer_definition(def, &mut env, &tokens, &mut fns) {
+            panic!("Type error: {:?}", e);
+        }
+    }
+
     match _command.as_str() {
         "build" | "run" => {
             let mut codegen = Codegen::new();
@@ -98,7 +112,17 @@ fn main() {
             }
         }
         "check" => {
-            eprintln!("Type checking not yet integrated. Assuming valid.");
+            let mut env = TypeEnv::new();
+            let mut tokens = TokenEnv::new();
+            let mut fns = FnEnv::new();
+            tokens.insert("ConsoleToken".to_string());
+            for def in &program {
+                match infer_definition(def, &mut env, &tokens, &mut fns) {
+                    Ok(ty) => eprintln!("✓ {:?} → {:?}",
+                                      match def { Definition::Let{name,..} => name, _ => "const" }, ty),
+                    Err(e) => eprintln!("Type error: {:?}", e),
+                }
+            }
         }
         _ => eprintln!("Unknown command: {}", _command),
     }

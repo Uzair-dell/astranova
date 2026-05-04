@@ -45,6 +45,10 @@ fn is_pure(expr: &Expr) -> bool {
         Expr::Block(exprs) => exprs.iter().all(|e| is_pure(e)),
         Expr::FunctionCall { .. } => false,
         Expr::WorldPragma(_) => false,
+         // ---- array support ----
+        Expr::ArrayAlloc(_) => false,
+        Expr::Subscript { .. } => false,
+        Expr::SubscriptAssign { .. } => false,
     }
 }
 

@@ -1,0 +1,2 @@
+\let total = \sum_{i=1}^{5} 1
+@world Print(total)
