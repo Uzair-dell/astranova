@@ -39,7 +39,8 @@ mod tests {
         let ast = Definition::Let {
             name: "V".to_string(),
             params: vec![],
-            body: Expr::BinaryOp {
+            is_func: false,
+            body: Expr::BinaryOp{
                 op: BinOp::Mul,
                 left: Box::new(Expr::BinaryOp {
                     op: BinOp::Mul,

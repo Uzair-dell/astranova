@@ -19,7 +19,7 @@ fn parse_simple_assignment() {
     // \let E = m * c^2
     let def = parse_single_def(r"\let E = m * c^2");
     match def {
-        Definition::Let { name, params, body } => {
+         Definition::Let { name, params, body, .. }
             assert_eq!(name, "E");
             assert!(params.is_empty());
             // body should be: m * (c ^ 2)

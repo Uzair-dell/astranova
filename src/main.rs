@@ -6,8 +6,6 @@ use astranovac::parser::Parser;
 use astranovac::codegen::Codegen;
 use astranovac::typecheck::{TypeEnv, TokenEnv, FnEnv, infer_definition};
 use astranovac::ast::Definition;
-use astranovac::optimizer;
-use astranovac::ast::Definition;
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 3 {
@@ -63,8 +61,7 @@ fn main() {
 
     let tokens = lex(&source);
     let mut parser = Parser::new(tokens);
-    let program = parser.parse_program();
-
+    let mut program = parser.parse_program();
     // --- Single type‑check pass (shared between build and run) ---
     let mut env = TypeEnv::new();
     let mut tokens = TokenEnv::new();
@@ -83,6 +80,18 @@ fn main() {
         match def {
             Definition::Let { body, .. } => *body = optimizer::optimize(body),
             Definition::Const { value, .. } => *value = optimizer::optimize(value),
+        }
+    }
+        // --- Nuclear Optimizer pass ---
+    for def in &mut program {
+        match def {
+            astranovac::ast::Definition::Let { body, .. } => {
+                *body = astranovac::optimizer::optimize(body);
+            }
+            astranovac::ast::Definition::Const { value, .. } => {
+                *value = astranovac::optimizer::optimize(value);
+            }
+            _ => {}
         }
     }
 
