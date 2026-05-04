@@ -5,7 +5,7 @@ use astranovac::lexer::lex;
 use astranovac::parser::Parser;
 use astranovac::codegen::Codegen;
 use astranovac::typecheck::{TypeEnv, TokenEnv, FnEnv, infer_definition};
-use astranovac::ast::Definition;
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 3 {
@@ -91,7 +91,7 @@ fn main() {
             astranovac::ast::Definition::Const { value, .. } => {
                 *value = astranovac::optimizer::optimize(value);
             }
-            _ => {}
+           
         }
     }
 

@@ -83,4 +83,33 @@ mod tests {
             _ => panic!("Expected Div"),
         }
     }
+
+    #[test]
+    fn sum_of_squares_closed_form() {
+        let sum = Expr::Sum {
+            index: "i".to_string(),
+            start: Box::new(Expr::Number(1.0)),
+            end:   Box::new(Expr::Variable("n".to_string())),
+            body:  Box::new(Expr::BinaryOp {
+                op: BinOp::Pow,
+                left: Box::new(Expr::Variable("i".to_string())),
+                right: Box::new(Expr::Number(2.0)),
+            }),
+        };
+        let result = optimize(&sum);
+        // Expected: n * (n+1) * (2*n+1) / 6
+        match result {
+            Expr::BinaryOp { op, ref left, ref right } => {
+                assert_eq!(op, BinOp::Div);
+                assert_eq!(**right, Expr::Number(6.0));
+                match left.as_ref() {
+                    Expr::BinaryOp { op: op2, .. } => {
+                        assert_eq!(*op2, BinOp::Mul);
+                    },
+                    _ => panic!("Expected Mul on left"),
+                }
+            },
+            _ => panic!("Expected Div"),
+        }
+    }
 }

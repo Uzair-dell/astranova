@@ -1,26 +1,25 @@
 {
   "patterns": [
     {
-      "name": "sum_identity",
-      "description": "Sum of i from 1 to n = n*(n+1)/2",
+      "name": "sum_of_i",
       "template": {
         "node": "Sum",
         "index": "i",
         "start": { "node": "Number", "value": 1.0 },
-        "end": { "node": "Variable", "name": "__n" },
-        "body": { "node": "Variable", "name": "i" }
+        "end":   { "node": "Variable", "name": "__n" },
+        "body":  { "node": "Variable", "name": "__i" }
       },
       "rewrite": {
         "node": "BinaryOp",
-        "op": "/",
+        "op": "Div",
         "left": {
           "node": "BinaryOp",
-          "op": "*",
-          "left": { "node": "Variable", "name": "__n" },
+          "op": "Mul",
+          "left":  { "node": "Variable", "name": "__n" },
           "right": {
             "node": "BinaryOp",
-            "op": "+",
-            "left": { "node": "Variable", "name": "__n" },
+            "op": "Add",
+            "left":  { "node": "Variable", "name": "__n" },
             "right": { "node": "Number", "value": 1.0 }
           }
         },
@@ -29,65 +28,48 @@
     },
     {
       "name": "sum_of_squares",
-      "description": "Sum of i^2 from 1 to n = n*(n+1)*(2n+1)/6",
       "template": {
         "node": "Sum",
         "index": "i",
         "start": { "node": "Number", "value": 1.0 },
-        "end": { "node": "Variable", "name": "__n" },
+        "end":   { "node": "Variable", "name": "__n" },
         "body": {
-          "node": "Pow",
-          "base": { "node": "Variable", "name": "i" },
-          "exp": { "node": "Number", "value": 2.0 }
+          "node": "BinaryOp",
+          "op": "Pow",
+          "left":  { "node": "Variable", "name": "__i" },
+          "right": { "node": "Number", "value": 2.0 }
         }
       },
       "rewrite": {
         "node": "BinaryOp",
-        "op": "/",
+        "op": "Div",
         "left": {
           "node": "BinaryOp",
-          "op": "*",
-          "left": { "node": "Variable", "name": "__n" },
-          "right": {
+          "op": "Mul",
+          "left": {
             "node": "BinaryOp",
-            "op": "*",
-            "left": {
-              "node": "BinaryOp",
-              "op": "+",
-              "left": { "node": "Variable", "name": "__n" },
-              "right": { "node": "Number", "value": 1.0 }
-            },
+            "op": "Mul",
+            "left":  { "node": "Variable", "name": "__n" },
             "right": {
               "node": "BinaryOp",
-              "op": "+",
-              "left": {
-                "node": "BinaryOp",
-                "op": "*",
-                "left": { "node": "Number", "value": 2.0 },
-                "right": { "node": "Variable", "name": "__n" }
-              },
+              "op": "Add",
+              "left":  { "node": "Variable", "name": "__n" },
               "right": { "node": "Number", "value": 1.0 }
             }
+          },
+          "right": {
+            "node": "BinaryOp",
+            "op": "Add",
+            "left": {
+              "node": "BinaryOp",
+              "op": "Mul",
+              "left":  { "node": "Number", "value": 2.0 },
+              "right": { "node": "Variable", "name": "__n" }
+            },
+            "right": { "node": "Number", "value": 1.0 }
           }
         },
         "right": { "node": "Number", "value": 6.0 }
-      }
-    },
-    {
-      "name": "constant_sum",
-      "description": "Sum of a constant c from 1 to n = c * n",
-      "template": {
-        "node": "Sum",
-        "index": "i",
-        "start": { "node": "Number", "value": 1.0 },
-        "end": { "node": "Variable", "name": "__n" },
-        "body": { "node": "Variable", "name": "__c" }
-      },
-      "rewrite": {
-        "node": "BinaryOp",
-        "op": "*",
-        "left": { "node": "Variable", "name": "__c" },
-        "right": { "node": "Variable", "name": "__n" }
       }
     }
   ]
