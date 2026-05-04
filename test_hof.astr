@@ -1,0 +1,4 @@
+\let f(x) = x * x
+\let derivative(fn, x) = ( fn(x + 1.0e-7) - fn(x - 1.0e-7) ) / 2.0e-7
+\let df = derivative(f, 3.0)
+@world Print(df)

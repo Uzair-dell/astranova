@@ -1,0 +1,2 @@
+\let area(r) = \pi * r^2 where \pi = 3.14159
+@world Print( area(5) )

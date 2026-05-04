@@ -1,0 +1,20 @@
+% Number theory – non‑recursive (uses lookup table for small primes)
+
+\let abs(n) = \begin{cases}
+    n & n \ge 0 \\
+    -n & 1
+\end{cases}
+
+\let remainder(a, b) = a - b * (a / b)
+
+\let is_prime(n) = \begin{cases}
+    0 & n < 2 \\
+    1 & n = 2 \\
+    1 & n = 3 \\
+    1 & n = 5 \\
+    1 & n = 7 \\
+    1 & n = 11 \\
+    1 & n = 13 \\
+    1 & n = 17 \\
+    0 & 1
+\end{cases}

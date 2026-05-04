@@ -1,0 +1,6 @@
+\let f(x) = x^2 - 2
+\let root = newton(f, 1.0, 1.0e-10, 100)
+@world Print(root)
+
+\let area = integral_trapezoid( f, 0.0, 1.0, 100 )
+@world Print(area)

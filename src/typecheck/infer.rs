@@ -68,6 +68,8 @@ pub fn infer(expr: &Expr, env: &HashMap<String, Type>) -> Result<Type, String> {
 
         Expr::Tuple(_) => Err("Tuples are not yet fully typed".to_string()),
         Expr::List(_) => Err("Lists are not yet fully typed".to_string()),
+        Expr::Assign { .. } => Err("Assignment not supported in pure expressions".to_string()),
+        Expr::Block(_) => Err("Block expressions not supported in pure expressions".to_string()),
 
         Expr::WorldPragma(_) => Ok(Type::Scalar(None)),
                 Expr::Parallel(exprs) => {
@@ -78,8 +80,17 @@ pub fn infer(expr: &Expr, env: &HashMap<String, Type>) -> Result<Type, String> {
             } else {
                 infer(&exprs[0], env)
             }
-        }
-
+        },
+        Expr::LetIn { bindings, body } => {
+            // Temporarily add bindings to the environment
+            let mut extended_env = env.clone();
+            for (name, expr) in bindings {
+                let t = infer(expr, env)?;
+                extended_env.insert(name.clone(), t);
+            }
+            infer(body, &extended_env)
+        },
+        Expr::FunctionRef(_) => Ok(Type::Scalar(None)),
         Expr::FunctionCall { name, args } => {
             if name == "Reject" {
                 if args.is_empty() {

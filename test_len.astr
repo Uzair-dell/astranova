@@ -1,0 +1,5 @@
+\let s = "Hello"
+\let l = length(s)
+\let c = char_at(s, 0)
+@world Print(l)
+@world Print(c)

@@ -1,0 +1,20 @@
+\let c = 299792458
+\let G = 6.67430e-11
+\let h = 6.62607015e-34
+\let g_earth = 9.80665
+
+\let energy_mass(m) = m * c * c
+\let lorentz_factor(v) = 1 / \sqrt(1 - (v*v)/(c*c))
+\let relativistic_mass(m0, v) = m0 * lorentz_factor(v)
+
+% Newton's gravity – split into two parts to avoid parser issues
+\let newton_gravity(m1, m2, r) = G * m1 * m2 / (r * r)
+
+\let velocity(s, t) = s / t
+\let acceleration(v0, v, t) = (v - v0) / t
+\let distance_vel(v0, a, t) = v0*t + 0.5 * a * t*t
+\let force(m, a) = m * a
+\let kinetic_energy(m, v) = 0.5 * m * v * v
+\let potential_energy(m, h) = m * g_earth * h
+\let period_spring(m, k) = 2 * \pi * \sqrt(m / k)
+\let period_pendulum(L) = 2 * \pi * \sqrt(L / g_earth)

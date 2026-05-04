@@ -1,0 +1,3 @@
+\let x = 1
+x = 5
+@world Print(x)

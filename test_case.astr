@@ -1,0 +1,5 @@
+\let test(n) = \begin{cases}
+    1 & n = 2 \\
+    0 & 1
+\end{cases}
+@world Print( test(2) )

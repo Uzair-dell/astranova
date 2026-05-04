@@ -37,6 +37,12 @@ fn is_pure(expr: &Expr) -> bool {
         Expr::Tuple(exprs) | Expr::List(exprs) | Expr::Parallel(exprs) => {
             exprs.iter().all(|e| is_pure(e))
         }
+        Expr::LetIn { bindings, body } => {
+            bindings.iter().all(|(_, e)| is_pure(e)) && is_pure(body)
+        }
+        Expr::Assign { value, .. } => is_pure(value),
+        Expr::FunctionRef(_) => true,
+        Expr::Block(exprs) => exprs.iter().all(|e| is_pure(e)),
         Expr::FunctionCall { .. } => false,
         Expr::WorldPragma(_) => false,
     }
@@ -172,7 +178,7 @@ pub fn eval(
                 sovereign: ctx.sovereign.clone(),
                 unsafe_token: ctx.unsafe_token.clone(),
                 enclave: ctx.enclave.clone(),
-                actor_rx: None,   // no actor channel in parallel workers
+                actor_rx: None,
             };
             let env = env.clone();
 
@@ -299,6 +305,34 @@ pub fn eval(
             }
         }
 
+        Expr::LetIn { bindings, body } => {
+            let mut extended_env = env.clone();
+            for (name, expr) in bindings {
+                let (val, _) = eval(expr, env, ctx)?;
+                extended_env.insert(name.clone(), val);
+            }
+            eval(body, &extended_env, ctx)
+        },
+
+        // ---------- NEW ARMS ----------
+        Expr::Assign { var, value } => {
+            let (val, world) = eval(value, env, ctx)?;
+            let mut extended = env.clone();
+            extended.insert(var.clone(), val);
+            Ok((val, world))
+        },
+        Expr::Block(exprs) => {
+            let mut last_val = 0.0;
+            let mut last_world = ctx.world.take();
+            for e in exprs {
+                let (v, w) = eval(e, env, ctx)?;
+                last_val = v;
+                last_world = w;
+            }
+            ctx.world = last_world;
+            Ok((last_val, ctx.world.take()))
+        },
+
         other => Err(format!("Evaluation not supported for {:?}", other)),
     }
 }
@@ -338,7 +372,6 @@ mod tests {
         }
     }
 
-    // ---------- Original tests (all with actor_rx: None) ----------
     #[test]
     fn constant() {
         assert_eq!(eval_def(r"\let x = 5", &HashMap::new()), Ok(5.0));
@@ -598,7 +631,6 @@ mod tests {
         assert!(result.unwrap_err().contains("@world"));
     }
 
-    // ---------- Phase 7.3: Actor model test ----------
     #[test]
     fn actor_spawn_and_receive() {
         let mut ctx = RuntimeContext {

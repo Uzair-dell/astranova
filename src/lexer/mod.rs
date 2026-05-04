@@ -11,6 +11,8 @@ pub enum Token {
     Let,
     Const,
     World,
+    Where,
+
 
     LBrace,
     RBrace,
@@ -23,6 +25,7 @@ pub enum Token {
     Colon,
     Underscore,
     Backslash,
+
 
     Plus,
     Minus,
@@ -41,6 +44,7 @@ pub enum Token {
     And,
     Or,
 
+
     Equal,
 
     Frac,
@@ -52,6 +56,7 @@ pub enum Token {
     CasesBegin,
     CasesEnd,
     Amp,
+    Dot,
 
     UnitAnnotation(String),
 }
@@ -206,6 +211,10 @@ impl<'a> Lexer<'a> {
                 "ge" => return Some(Token::Ge),
                 "le" => return Some(Token::Le),
                 "ne" => return Some(Token::Neq),
+                "land" => return Some(Token::And),
+                "lor"  => return Some(Token::Or),
+                "where" => return Some(Token::Where),
+                "" => { /* stray backslash – ignore and get next token */ return self.next_token(); }
                 _ => return Some(Token::GreekLetter(format!("\\{}", cmd))),
             }
         }
@@ -303,10 +312,18 @@ impl<'a> Lexer<'a> {
                 }
             }
             '"' => unreachable!(),
+            '.' => {
+                self.advance();
+                return Some(Token::Dot);
+            }
             _ => {
                 if c.is_alphabetic() || c == '_' {
                     let ident = self.read_identifier_or_greek();
-                    return Some(Token::Identifier(ident));
+                    if ident == "where" {
+                        return Some(Token::Where);
+                    } else {
+                        return Some(Token::Identifier(ident));
+                    }
                 }
                 self.advance();
                 return self.next_token();

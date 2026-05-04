@@ -1,0 +1,9 @@
+\let mean2(a, b) = (a + b) / 2
+\let mean3(a, b, c) = (a + b + c) / 3
+\let mean4(a, b, c, d) = (a + b + c + d) / 4
+\let var3(a, b, c) = ((a-m)*(a-m) + (b-m)*(b-m) + (c-m)*(c-m)) / 3 where m = mean3(a,b,c)
+\let std3(a, b, c) = \sqrt(var3(a,b,c))
+\let gauss_pdf(x, mu, sigma) = (1 / (sigma * \sqrt(2*\pi))) * \exp( -((x-mu)*(x-mu)) / (2*sigma*sigma) )
+\let binomial(n, k, p) = (fact(n) / (fact(k) * fact(n-k))) * (p^k) * ((1-p)^(n-k))
+\let fact(n) = \prod_{i=1}^{n} i
+\let mov_avg3(a, b, c) = (a + b + c) / 3

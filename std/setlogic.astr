@@ -1,0 +1,14 @@
+% Set operations on 3‑element tuples (non‑recursive)
+
+\let union3(A, B) = ( get(A,0), get(A,1), get(A,2), get(B,0), get(B,1), get(B,2) )
+
+\let intersection3(A, B) = (
+    \begin{cases} get(A,0) & (get(A,0)=get(B,0) \lor get(A,0)=get(B,1) \lor get(A,0)=get(B,2)) \\ 0 & 1 \end{cases},
+    \begin{cases} get(A,1) & (get(A,1)=get(B,0) \lor get(A,1)=get(B,1) \lor get(A,1)=get(B,2)) \\ 0 & 1 \end{cases},
+    \begin{cases} get(A,2) & (get(A,2)=get(B,0) \lor get(A,2)=get(B,1) \lor get(A,2)=get(B,2)) \\ 0 & 1 \end{cases}
+)
+
+\let not(p) = \begin{cases} 1 & p = 0 \\ 0 & 1 \end{cases}
+\let and(p, q) = p * q
+\let or(p, q) = \begin{cases} 1 & p + q > 0 \\ 0 & 1 \end{cases}
+\let implies(p, q) = or(not(p), q)

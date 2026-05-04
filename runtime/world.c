@@ -36,3 +36,18 @@ void* world_alloc(size_t size) {
 void world_free(void* ptr) {
     free(ptr);
 }
+
+// Read entire file into a malloc'd buffer. Returns NULL on failure.
+char* world_read_file_from_path(const char* path) {
+    FILE* f = fopen(path, "rb");
+    if (!f) return NULL;
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    rewind(f);
+    char* buf = (char*)malloc(size + 1);
+    if (!buf) { fclose(f); return NULL; }
+    fread(buf, 1, size, f);
+    buf[size] = '\0';
+    fclose(f);
+    return buf;
+}

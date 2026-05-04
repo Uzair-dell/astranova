@@ -7,13 +7,13 @@
 
 /// Binary operators (arithmetic, comparison, logic)
 #[derive(Debug, Clone, Copy, PartialEq)]
- pub enum BinOp {
+pub enum BinOp {
     Add,
     Sub,
     Mul,
     Div,
-    Dot,   // \cdot
-    Cross, // \times
+    Dot,
+    Cross,
     Pow,
     Eq,
     Neq,
@@ -23,7 +23,7 @@
     Ge,
     And,
     Or,
- }
+}
 
 /// Unary operators (negation, trig, etc.)
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -45,7 +45,7 @@ pub enum Expr {
     Number(f64),
 
     /// A string literal, e.g., "hello"
-    StringLiteral(String),   // <-- NEW
+    StringLiteral(String),
 
     /// A named variable, e.g., x, mass, gravitational_constant
     Variable(String),
@@ -78,7 +78,7 @@ pub enum Expr {
         den: Box<Expr>,
     },
 
-    /// Exponentiation: base ^ exp
+    /// Exponentiation: base ^ exp (typically from x^2 syntax)
     Pow {
         base: Box<Expr>,
         exp:  Box<Expr>,
@@ -115,22 +115,40 @@ pub enum Expr {
         body:     Box<Expr>,
     },
 
-    /// Piecewise function
+    /// Piecewise function: \begin{cases} expr1 & cond1 \\ expr2 & cond2 \end{cases}
     Cases {
         branches: Vec<(Expr, Expr)>,
     },
 
-    /// Ordered collection
+    /// Ordered collection (a,b,c)
     Tuple(Vec<Expr>),
 
-    /// Homogeneous list
+    /// Homogeneous list [a,b,c]
     List(Vec<Expr>),
 
-        /// Parallel evaluation: each sub‑expression is computed concurrently.
+    /// Local bindings introduced by a `where` clause
+    LetIn {
+        bindings: Vec<(String, Expr)>,
+        body: Box<Expr>,
+    },
+
+    /// Parallel evaluation \parallel{ expr1, expr2, ... }
     Parallel(Vec<Expr>),
 
-    /// A side‑effecting world interaction, @world expr
+    /// A side‑effecting world interaction, written as @world expr
     WorldPragma(Box<Expr>),
+
+    /// A reference to a named function (used when passing a function as an argument)
+    FunctionRef(String),
+
+    /// Assignment to a mutable variable: var = expr
+    Assign {
+        var: String,
+        value: Box<Expr>,
+    },
+
+    /// Sequence of expressions, separated by semicolons
+    Block(Vec<Expr>),
 }
 
 // ---------- Type nodes ----------
@@ -157,6 +175,7 @@ pub enum Definition {
     Let {
         name:   String,
         params: Vec<String>,
+        is_func: bool,  
         body:   Expr,
     },
     Const {

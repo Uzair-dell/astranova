@@ -1,0 +1,26 @@
+\let point2(x, y) = (x, y)
+\let point3(x, y, z) = (x, y, z)
+
+\let distance2(p, q) = vec2_distance(p, q)
+\let distance3(p, q) = vec3_distance(p, q)
+
+\let triangle_area2(a, b, c) = \abs( get(a,0)*(get(b,1)-get(c,1)) + get(b,0)*(get(c,1)-get(a,1)) + get(c,0)*(get(a,1)-get(b,1)) ) / 2
+
+\let sphere_volume(radius) = (4/3) * \pi * radius^3
+\let sphere_surface(radius) = 4 * \pi * radius^2
+\let circle_area(radius) = \pi * radius^2
+\let circle_circumference(radius) = 2 * \pi * radius
+
+\let bbox_overlap2(a_min, a_max, b_min, b_max) = \begin{cases}
+    1 & get(a_min,0) < get(b_max,0) \land get(a_max,0) > get(b_min,0) \land
+         get(a_min,1) < get(b_max,1) \land get(a_max,1) > get(b_min,1) \\
+    0 & 1
+\end{cases}
+
+\let seg_intersect2(p1, p2, q1, q2) = \begin{cases}
+    1 & (orientation(p1,p2,q1) * orientation(p1,p2,q2) < 0) \land
+         (orientation(q1,q2,p1) * orientation(q1,q2,p2) < 0) \\
+    0 & 1
+\end{cases}
+
+\let orientation(p, q, r) = (get(q,1) - get(p,1)) * (get(r,0) - get(q,0)) - (get(q,0) - get(p,0)) * (get(r,1) - get(q,1))

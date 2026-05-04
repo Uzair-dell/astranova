@@ -1,0 +1,1 @@
+\let print(msg) = @world Print(msg)

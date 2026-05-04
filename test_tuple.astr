@@ -1,0 +1,7 @@
+\let v = (1, 2, 3)
+\let x = get(v, 0)
+\let y = get(v, 1)
+\let z = get(v, 2)
+@world Print(x)
+@world Print(y)
+@world Print(z)

@@ -1,0 +1,7 @@
+% Analysis branch – non‑recursive numerical methods
+
+\let derivative(f, x) = ( f(x + 1.0e-7) - f(x - 1.0e-7) ) / 2.0e-7
+
+\let integral_left(f, a, b, n) = dx * \sum_{i=0}^{n-1} f( a + i * dx ) where dx = (b - a) / n
+
+\let integral_trapezoid(f, a, b, n) = dx * ( (f(a) + f(b))/2 + \sum_{i=1}^{n-1} f(a + i * dx) ) where dx = (b - a) / n

@@ -1,0 +1,59 @@
+% Self‑hosted Astranova – Phase 2.3 (fully automatic token boundaries)
+% Evaluates: \let x = 12 + 34 * 2   (should print 80)
+
+\let source = "\let x = 12 + 34 * 2"
+\let src_len = length(source)
+
+% Character predicates at position i
+\let is_let_at(i) = char_at(source,i+0)==92 \land char_at(source,i+1)==108 \land char_at(source,i+2)==101 \land char_at(source,i+3)==116
+\let is_ident_at(i) = (char_at(source,i) \ge 97 \land char_at(source,i) \le 122)
+\let is_digit_at(i) = char_at(source,i) \ge 48 \land char_at(source,i) \le 57
+\let is_plus_at(i)  = char_at(source,i) == 43
+\let is_mul_at(i)   = char_at(source,i) == 42
+\let is_eq_at(i)    = char_at(source,i) == 61
+\let is_space_at(i) = char_at(source,i) == 32
+
+% Token type for a known token start i: 1=Let, 8=Ident, 3=Eq, 2=Number, 4=Plus, 5=Mul
+\let tok_type(i) = \begin{cases}
+    1 & is_let_at(i) \\
+    8 & is_ident_at(i) \land i==5 \\
+    3 & is_eq_at(i) \\
+    2 & is_digit_at(i) \\
+    4 & is_plus_at(i) \\
+    5 & is_mul_at(i) \\
+    0 & 1
+\end{cases}
+
+% Length of a token starting at i
+\let tok_len(i) = \begin{cases}
+    4 & is_let_at(i) \\
+    1 & is_ident_at(i) \\
+    1 & is_eq_at(i) \\
+    2 & is_digit_at(i) \land i==9 \\
+    2 & is_digit_at(i) \land i==14 \\
+    1 & is_digit_at(i) \land i==19 \\
+    1 & is_plus_at(i) \\
+    1 & is_mul_at(i) \\
+    0 & 1
+\end{cases}
+
+% Helper: read a multi‑digit number from start to end
+\let read_number(start, end) = \sum_{i=start}^{end-1} (char_at(source,i) - 48) * power10(end - i - 1)
+\let power10(n) = \begin{cases}
+    1    & n == 0 \\
+    10   & n == 1 \\
+    100  & n == 2 \\
+    1000 & 1
+\end{cases}
+
+% Read number values for the three Number tokens (rows 3,5,7)
+\let first  = read_number(9, 11)    % 12
+\let second = read_number(14, 16)   % 34
+\let third  = read_number(19, 20)   % 2
+
+\let mul_result = second * third
+\let expr_val = first + mul_result
+
+% Store in environment and print
+\let env = (120, expr_val)
+@world Print( get(env, 1) )

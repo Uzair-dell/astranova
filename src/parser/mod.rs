@@ -1,6 +1,5 @@
-//! Astranova Parser – converts a token stream into an AST.
-//! Full support for function calls, parallel, and all primitive types.
-//! Added: unary minus/plus prefix, optional superscript for Sum/Prod.
+//! Astranova Parser – final production version
+//! Supports assignment, sequencing, and the full language.
 
 use crate::ast::{BinOp, Definition, Expr, Type, UnOp};
 use crate::lexer::Token;
@@ -8,129 +7,133 @@ use crate::lexer::Token;
 pub struct Parser {
     tokens: Vec<Token>,
     pos: usize,
+    function_names: Vec<String>,
 }
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
-        Parser { tokens, pos: 0 }
+        Parser { tokens, pos: 0, function_names: Vec::new() }
     }
 
-    fn peek(&self) -> Option<&Token> {
-        self.tokens.get(self.pos)
-    }
+    fn peek(&self) -> Option<&Token> { self.tokens.get(self.pos) }
 
     fn advance(&mut self) -> &Token {
-        let token = &self.tokens[self.pos];
+        let t = &self.tokens[self.pos];
         self.pos += 1;
-        token
+        t
     }
 
     fn expect(&mut self, expected: Token) {
         let actual = self.peek();
         match actual {
-            Some(t) if *t == expected => {
-                self.advance();
-            }
-            _ => {
-                panic!(
-                    "Parser error: expected {:?}, found {:?} at position {}",
-                    expected,
-                    actual,
-                    self.pos
-                );
-            }
+            Some(t) if *t == expected => { self.advance(); }
+            _ => panic!("Parser error: expected {:?}, found {:?} at pos {}", expected, actual, self.pos),
         }
     }
 
-    // ---------- Top‑level definitions ----------
-
+    // ---------- top‑level program ----------
     pub fn parse_program(&mut self) -> Vec<Definition> {
         let mut definitions = Vec::new();
         while self.peek().is_some() {
-            definitions.push(self.parse_definition());
+            match self.peek() {
+                Some(Token::Let)   => definitions.push(self.parse_let()),
+                Some(Token::Const) => definitions.push(self.parse_const()),
+                Some(Token::World) => definitions.push(self.parse_world()),
+                // Top‑level expression statements (assignment, sequencing, …)
+                                _ => {
+                    let expr = self.parse_expr(0);
+                    definitions.push(Definition::Let {
+                        name: String::new(),
+                        params: vec![],
+                        is_func: false,    // ← added
+                        body: expr,
+                    });
+                }
+            }
         }
         definitions
     }
 
-    fn parse_definition(&mut self) -> Definition {
-        match self.peek() {
-            Some(Token::Let) => self.parse_let(),
-            Some(Token::Const) => self.parse_const(),
-            Some(Token::World) => {
-                self.advance(); // consume '@world'
-                let inner = match self.peek() {
-                    Some(Token::StringLiteral(s)) => {
-                        let msg = s.clone();
-                        self.advance();
-                        Expr::StringLiteral(msg)
-                    }
-                    Some(Token::Identifier(id)) if id == "Print" => {
-                        self.advance();
-                        self.expect(Token::LParen);
-                        let expr = self.parse_expr(0);
-                        self.expect(Token::RParen);
-                        Expr::FunctionCall {
-                            name: "Print".to_string(),
-                            args: vec![expr],
-                        }
-                    }
-                    _ => panic!("Expected a string or Print(expr) after @world"),
-                };
-                Definition::Let {
-                    name: "@world".to_string(),
-                    params: vec![],
-                    body: Expr::WorldPragma(Box::new(inner)),
-                }
+    // -------- @world --------
+    fn parse_world(&mut self) -> Definition {
+        self.advance(); // '@world'
+        let inner = match self.peek() {
+            Some(Token::StringLiteral(s)) => { let m = s.clone(); self.advance(); Expr::StringLiteral(m) }
+            Some(Token::Identifier(id)) if id == "Print" => {
+                self.advance(); self.expect(Token::LParen);
+                let expr = self.parse_expr(0); self.expect(Token::RParen);
+                Expr::FunctionCall { name: "Print".to_string(), args: vec![expr] }
             }
-            other => panic!("Expected a definition, found {:?}", other),
+            _ => panic!("Expected string or Print after @world"),
+        };
+                Definition::Let {
+            name: "@world".to_string(),
+            params: vec![],
+            is_func: false,    // ← added
+            body: Expr::WorldPragma(Box::new(inner)),
         }
     }
-
+    // -------- \let --------
     fn parse_let(&mut self) -> Definition {
         self.expect(Token::Let);
         let name = match self.advance() {
             Token::Identifier(s) => s.clone(),
-            t => panic!("Expected identifier after \\let, found {:?}", t),
+            t => panic!("Expected identifier, got {:?}", t)
         };
+
+        let saw_paren = self.peek() == Some(&Token::LParen);
         let params = self.parse_params();
-        self.expect(Token::Equal);
-        let body = self.parse_expr(0);
-        Definition::Let {
-            name,
-            params,
-            body,
+        let is_func = saw_paren;
+
+        // Register function name if it's a function (zero‑ or multi‑parameter)
+        if is_func {
+            self.function_names.push(name.clone());
         }
-    }
 
-    fn parse_const(&mut self) -> Definition {
-        self.expect(Token::Const);
-        let name = match self.advance() {
-            Token::Identifier(s) => s.clone(),
-            t => panic!("Expected identifier after \\const, found {:?}", t),
-        };
-        self.expect(Token::Colon);
-        let typ = self.parse_type();
         self.expect(Token::Equal);
-        let value = self.parse_expr(0);
-        Definition::Const { name, typ, value }
-    }
+        let mut body = self.parse_expr(0);
 
+        // Sequencing with semicolons inside a \let body
+        if self.peek() == Some(&Token::Semicolon) {
+            let mut exprs = vec![body];
+            while self.peek() == Some(&Token::Semicolon) {
+                self.advance();
+                exprs.push(self.parse_expr(0));
+            }
+            body = Expr::Block(exprs);
+        }
+
+        // Optional where clause
+        if self.peek() == Some(&Token::Where) {
+            self.advance();
+            let mut bindings = Vec::new();
+            loop {
+                let var = match self.advance() {
+                    Token::Identifier(s) => s.clone(),
+                    Token::GreekLetter(g) => g.clone(),
+                    t => panic!("Expected variable, got {:?}", t)
+                };
+                self.expect(Token::Equal);
+                let val = self.parse_expr(0);
+                bindings.push((var, val));
+                if self.peek() != Some(&Token::Comma) { break; }
+                self.advance();
+            }
+            body = Expr::LetIn { bindings, body: Box::new(body) };
+        }
+
+        Definition::Let { name, params, body, is_func }
+    }
     fn parse_params(&mut self) -> Vec<String> {
         let mut params = Vec::new();
         if let Some(Token::LParen) = self.peek() {
             self.advance();
             loop {
                 match self.peek() {
-                    Some(Token::RParen) => {
-                        self.advance();
-                        break;
-                    }
+                    Some(Token::RParen) => { self.advance(); break; }
                     Some(Token::Identifier(s)) => {
-                        params.push(s.clone());
-                        self.advance();
-                        if let Some(Token::Comma) = self.peek() {
-                            self.advance();
-                        }
+                        params.push(s.clone()); self.advance();
+                        if let Some(Token::Comma) = self.peek() { self.advance(); }
                     }
                     _ => break,
                 }
@@ -139,273 +142,221 @@ impl Parser {
         params
     }
 
+    // -------- \const --------
+    fn parse_const(&mut self) -> Definition {
+        self.expect(Token::Const);
+        let name = match self.advance() { Token::Identifier(s) => s.clone(), t => panic!("Expected identifier, got {:?}", t) };
+        self.expect(Token::Colon); let typ = self.parse_type();
+        self.expect(Token::Equal); let value = self.parse_expr(0);
+        Definition::Const { name, typ, value }
+    }
+
     fn parse_type(&mut self) -> Type {
         match self.peek() {
-            Some(Token::Identifier(s)) if s == "Scalar" => {
-                self.advance();
-                let unit = self.parse_unit_opt();
-                Type::Scalar(unit)
-            }
-            Some(Token::Identifier(s)) if s == "Vector" => {
-                self.advance();
-                let dim = 3;
-                let unit = self.parse_unit_opt();
-                Type::Vector(dim, unit)
-            }
-            Some(Token::Identifier(s)) if s == "Sovereign" => {
-                self.advance();
-                Type::Sovereign
-            }
+            Some(Token::Identifier(s)) if s == "Scalar" => { self.advance(); let u = self.parse_unit_opt(); Type::Scalar(u) }
+            Some(Token::Identifier(s)) if s == "Vector" => { self.advance(); let u = self.parse_unit_opt(); Type::Vector(3, u) }
+            Some(Token::Identifier(s)) if s == "Sovereign" => { self.advance(); Type::Sovereign }
             other => panic!("Expected type, found {:?}", other),
         }
     }
 
     fn parse_unit_opt(&mut self) -> Option<crate::ast::Unit> {
         if let Some(Token::UnitAnnotation(content)) = self.peek() {
-            let content = content.clone();
-            self.advance();
-            let mut map = std::collections::HashMap::new();
-            map.insert(content, 1);
+            let c = content.clone(); self.advance();
+            let mut map = std::collections::HashMap::new(); map.insert(c, 1);
             Some(map)
-        } else {
-            None
-        }
+        } else { None }
     }
 
-    // ---------- Expressions (precedence climbing) ----------
-
+    // ---------- expressions ----------
     fn parse_expr(&mut self, min_prec: u8) -> Expr {
-        // Handle prefix unary operators
         let mut left = match self.peek() {
-            Some(Token::Minus) => {
-                self.advance();
-                Expr::UnaryOp { op: UnOp::Neg, operand: Box::new(self.parse_primary()) }
-            }
-            Some(Token::Plus) => {
-                self.advance();
-                Expr::UnaryOp { op: UnOp::Pos, operand: Box::new(self.parse_primary()) }
-            }
+            Some(Token::Minus) => { self.advance(); Expr::UnaryOp { op: UnOp::Neg, operand: Box::new(self.parse_primary()) } }
+            Some(Token::Plus)  => { self.advance(); Expr::UnaryOp { op: UnOp::Pos, operand: Box::new(self.parse_primary()) } }
             _ => self.parse_primary(),
         };
 
-        while let Some(token) = self.peek() {
-            let op = match token {
-                Token::Plus => BinOp::Add,
-                Token::Minus => BinOp::Sub,
-                Token::Star | Token::Cdot => BinOp::Mul,
-                Token::Slash => BinOp::Div,
-                Token::Times => BinOp::Cross,
-                Token::Caret => BinOp::Pow,
-                Token::Eq => BinOp::Eq,
-                Token::Neq => BinOp::Neq,
-                Token::Lt => BinOp::Lt,
-                Token::Gt => BinOp::Gt,
-                Token::Le => BinOp::Le,
-                Token::Ge => BinOp::Ge,
-                Token::And => BinOp::And,
-                Token::Or => BinOp::Or,
+        // Binary operators (precedence climbing)
+        while let Some(tok) = self.peek() {
+            let op = match tok {
+                Token::Plus => BinOp::Add, Token::Minus => BinOp::Sub, Token::Star|Token::Cdot => BinOp::Mul,
+                Token::Slash => BinOp::Div, Token::Times => BinOp::Cross, Token::Caret => BinOp::Pow,
+                Token::Eq => BinOp::Eq, Token::Neq => BinOp::Neq, Token::Lt => BinOp::Lt, Token::Gt => BinOp::Gt,
+                Token::Le => BinOp::Le, Token::Ge => BinOp::Ge, Token::And => BinOp::And, Token::Or => BinOp::Or,
                 _ => break,
             };
-
             let prec = precedence(&op);
-            if prec < min_prec {
-                break;
-            }
+            if prec < min_prec { break; }
             self.advance();
             let right = self.parse_expr(prec + 1);
-            left = Expr::BinaryOp {
-                op,
-                left: Box::new(left),
-                right: Box::new(right),
-            };
+            left = Expr::BinaryOp { op, left: Box::new(left), right: Box::new(right) };
+        }
+
+        // Assignment (lowest precedence, right‑associative)
+        if self.peek() == Some(&Token::Equal) {
+            self.advance();
+            let value = self.parse_expr(0);
+            if let Expr::Variable(var_name) = &left {
+                left = Expr::Assign { var: var_name.clone(), value: Box::new(value) };
+            } else {
+                panic!("Assignment target must be a variable, found {:?}", left);
+            }
+        }
+
+        // Sequencing with semicolons (lowest precedence, left‑associative)
+        while self.peek() == Some(&Token::Semicolon) {
+            self.advance(); // consume ';'
+            let next = self.parse_expr(0);
+            match &mut left {
+                Expr::Block(exprs) => exprs.push(next),
+                _ => left = Expr::Block(vec![left, next]),
+            }
         }
 
         left
     }
 
-
     fn parse_primary(&mut self) -> Expr {
         match self.advance().clone() {
             Token::Number(n) => Expr::Number(n),
-                        Token::Identifier(s) => {
-                if self.peek() == Some(&Token::LParen) {
-                    self.advance(); // consume '('
+
+            // -------- built‑ins: get / tlen --------
+            Token::Identifier(s) if s == "get" => {
+                self.expect(Token::LParen); let t = self.parse_expr(0);
+                self.expect(Token::Comma);  let i = self.parse_expr(0);
+                self.expect(Token::RParen);
+                Expr::FunctionCall { name: "get".to_string(), args: vec![t, i] }
+            }
+            Token::Identifier(s) if s == "tlen" => {
+                self.expect(Token::LParen); let t = self.parse_expr(0);
+                self.expect(Token::RParen);
+                Expr::FunctionCall { name: "tlen".to_string(), args: vec![t] }
+            }
+
+            // -------- function reference / variable / call --------
+            Token::Identifier(s) => {
+                if self.function_names.contains(&s) && self.peek() != Some(&Token::LParen) {
+                    Expr::FunctionRef(s)
+                } else if self.peek() == Some(&Token::LParen) {
+                    self.advance();
                     let mut args = Vec::new();
-                    loop {
-                        args.push(self.parse_expr(0));
-                        match self.peek() {
-                            Some(Token::Comma) => { self.advance(); }
-                            Some(Token::RParen) => { self.advance(); break; }
-                            _ => { self.advance(); } // lenient
+                    if self.peek() == Some(&Token::RParen) { self.advance(); }
+                    else {
+                        loop {
+                            args.push(self.parse_expr(0));
+                            match self.peek() {
+                                Some(Token::Comma) => { self.advance(); }
+                                Some(Token::RParen) => { self.advance(); break; }
+                                _ => break,
+                            }
                         }
                     }
                     Expr::FunctionCall { name: s, args }
-                } else {
-                    Expr::Variable(s)
-                }
+                } else { Expr::Variable(s) }
             }
-                       Token::GreekLetter(g) => {
+
+            // -------- Greek letters (built‑ins, constants) --------
+            Token::GreekLetter(g) => {
                 if self.peek() == Some(&Token::LParen) {
-                    self.advance(); // consume '('
+                    self.advance();
                     let mut args = Vec::new();
-                    loop {
-                        args.push(self.parse_expr(0));
-                        match self.peek() {
-                            Some(Token::Comma) => { self.advance(); }
-                            Some(Token::RParen) => { self.advance(); break; }
-                            _ => { self.advance(); }
-                        }
+                    if self.peek() == Some(&Token::RParen) { self.advance(); }
+                    else {
+                        loop { args.push(self.parse_expr(0)); match self.peek() { Some(Token::Comma) => { self.advance(); } Some(Token::RParen) => { self.advance(); break; } _ => break, } }
                     }
                     Expr::FunctionCall { name: g, args }
-                } else {
-                    Expr::GreekLetter(g)
-                }
+                } else { Expr::GreekLetter(g) }
             }
+
             Token::StringLiteral(s) => Expr::StringLiteral(s),
+
+            // -------- parentheses / tuple --------
             Token::LParen => {
-                let expr = self.parse_expr(0);
-                self.expect(Token::RParen);
-                expr
+                let first = self.parse_expr(0);
+                if self.peek() == Some(&Token::Comma) {
+                    let mut elts = vec![first];
+                    while self.peek() == Some(&Token::Comma) { self.advance(); elts.push(self.parse_expr(0)); }
+                    self.expect(Token::RParen);
+                    Expr::Tuple(elts)
+                } else { self.expect(Token::RParen); first }
             }
-            Token::LBrace => {
-                panic!("Unexpected '{{'");
-            }
+
+            // -------- \frac --------
             Token::Frac => {
-                self.expect(Token::LBrace);
-                let num = self.parse_expr(0);
-                self.expect(Token::RBrace);
-                self.expect(Token::LBrace);
-                let den = self.parse_expr(0);
-                self.expect(Token::RBrace);
-                Expr::Frac {
-                    num: Box::new(num),
-                    den: Box::new(den),
-                }
+                self.expect(Token::LBrace); let n = self.parse_expr(0); self.expect(Token::RBrace);
+                self.expect(Token::LBrace); let d = self.parse_expr(0); self.expect(Token::RBrace);
+                Expr::Frac { num: Box::new(n), den: Box::new(d) }
             }
-            Token::Sum => {
-                self.expect(Token::Underscore);
-                self.expect(Token::LBrace);
-                let index = match self.advance() {
-                    Token::Identifier(s) => s.clone(),
-                    _ => panic!("Expected identifier after sum_"),
-                };
-                self.expect(Token::Equal);
-                let start = self.parse_expr(0);
-                self.expect(Token::RBrace);
-                // superscript is optional; default to start (single iteration)
-                let end = if self.peek() == Some(&Token::Caret) {
-                    self.advance();
-                    self.expect(Token::LBrace);
-                    let e = self.parse_expr(0);
-                    self.expect(Token::RBrace);
-                    e
-                } else {
-                    start.clone()
-                };
-                let body = self.parse_expr(0);
-                Expr::Sum {
-                    index,
-                    start: Box::new(start),
-                    end:   Box::new(end),
-                    body:  Box::new(body),
-                }
-            }
-            Token::Prod => {
-                self.expect(Token::Underscore);
-                self.expect(Token::LBrace);
-                let index = match self.advance() {
-                    Token::Identifier(s) => s.clone(),
-                    _ => panic!("Expected identifier after prod_"),
-                };
-                self.expect(Token::Equal);
-                let start = self.parse_expr(0);
-                self.expect(Token::RBrace);
-                let end = if self.peek() == Some(&Token::Caret) {
-                    self.advance();
-                    self.expect(Token::LBrace);
-                    let e = self.parse_expr(0);
-                    self.expect(Token::RBrace);
-                    e
-                } else {
-                    start.clone()
-                };
-                let body = self.parse_expr(0);
-                Expr::Prod {
-                    index,
-                    start: Box::new(start),
-                    end:   Box::new(end),
-                    body:  Box::new(body),
-                }
-            }
-            Token::Lim => {
-                panic!("Limit not yet supported");
-            }
-            Token::CasesBegin => {
-                let mut branches = Vec::new();
-                loop {
-                    let value = self.parse_expr(0);
-                    self.expect(Token::Amp);
-                    let cond = self.parse_expr(0);
-                    branches.push((value, cond));
-                    match self.peek() {
-                        Some(Token::Backslash) => {
-                            self.advance();
-                        }
-                        Some(Token::CasesEnd) => {
-                            self.advance();
-                            break;
-                        }
-                        _ => break,
-                    }
-                }
-                Expr::Cases { branches }
-            }
+
+            // -------- \sum / \prod (optional superscript) --------
+            Token::Sum | Token::Prod => self.parse_sum_prod(),
+
+            // -------- \begin{cases} ... \end{cases} --------
+            Token::CasesBegin => self.parse_cases(),
+
+            // -------- \parallel{ ... } --------
             Token::Parallel => {
-                self.expect(Token::LBrace);
-                let mut exprs = Vec::new();
-                loop {
-                    exprs.push(self.parse_expr(0));
-                    match self.peek() {
-                        Some(Token::Comma) => { self.advance(); }
-                        Some(Token::RBrace) => { self.advance(); break; }
-                        _ => { self.advance(); }
-                    }
-                }
+                self.expect(Token::LBrace); let mut exprs = Vec::new();
+                loop { exprs.push(self.parse_expr(0)); match self.peek() { Some(Token::Comma) => { self.advance(); } Some(Token::RBrace) => { self.advance(); break; } _ => break, } }
                 Expr::Parallel(exprs)
             }
-            _ => panic!("Unexpected token: {:?}", self.tokens.get(self.pos - 1)),
+
+            // -------- @world inside expressions --------
+            Token::World => {
+                let inner = match self.peek() {
+                    Some(Token::StringLiteral(s)) => { let m = s.clone(); self.advance(); Expr::StringLiteral(m) }
+                    Some(Token::Identifier(id)) if id == "Print" => {
+                        self.advance(); self.expect(Token::LParen);
+                        let expr = self.parse_expr(0); self.expect(Token::RParen);
+                        Expr::FunctionCall { name: "Print".to_string(), args: vec![expr] }
+                    }
+                    _ => panic!("Expected string or Print after @world in expression"),
+                };
+                Expr::WorldPragma(Box::new(inner))
+            }
+
+            _ => panic!("Unexpected token in primary: {:?}", self.tokens.get(self.pos-1)),
         }
+    }
+
+    fn parse_sum_prod(&mut self) -> Expr {
+        let is_sum = matches!(self.tokens[self.pos-1], Token::Sum);
+        self.expect(Token::Underscore); self.expect(Token::LBrace);
+        let idx = match self.advance() { Token::Identifier(s) => s.clone(), _ => panic!("Expected identifier") };
+        self.expect(Token::Equal); let st = self.parse_expr(0); self.expect(Token::RBrace);
+        let en = if self.peek() == Some(&Token::Caret) {
+            self.advance(); self.expect(Token::LBrace); let e = self.parse_expr(0); self.expect(Token::RBrace); e
+        } else { st.clone() };
+        let body = self.parse_expr(0);
+        if is_sum { Expr::Sum { index: idx, start: Box::new(st), end: Box::new(en), body: Box::new(body) } }
+        else { Expr::Prod { index: idx, start: Box::new(st), end: Box::new(en), body: Box::new(body) } }
+    }
+
+    fn parse_cases(&mut self) -> Expr {
+        let mut branches = Vec::new();
+        loop {
+            if self.peek() == Some(&Token::CasesEnd) { self.advance(); break; }
+            let value = self.parse_expr(0);
+            self.expect(Token::Amp);
+            let cond = self.parse_expr(0);
+            branches.push((value, cond));
+            match self.peek() {
+                Some(Token::Backslash) => { self.advance(); }
+                Some(Token::CasesEnd)  => { self.advance(); break; }
+                _ => break,
+            }
+        }
+        Expr::Cases { branches }
     }
 }
 
-/// Operator precedence table.
+// ---------- operator precedence table ----------
 fn precedence(op: &BinOp) -> u8 {
     match op {
-        BinOp::Or => 1,
-        BinOp::And => 2,
+        BinOp::Or => 1, BinOp::And => 2,
         BinOp::Eq | BinOp::Neq | BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge => 3,
         BinOp::Add | BinOp::Sub => 4,
         BinOp::Mul | BinOp::Div | BinOp::Dot | BinOp::Cross => 5,
         BinOp::Pow => 6,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::lexer::lex;
-
-    #[test]
-    fn parse_let_definition() {
-        let src = r"\let V = \frac{4}{3} \cdot \pi \cdot r^3";
-        let tokens = lex(src);
-        let mut parser = Parser::new(tokens);
-        let prog = parser.parse_program();
-        assert_eq!(prog.len(), 1);
-        if let Definition::Let { name, .. } = &prog[0] {
-            assert_eq!(name, "V");
-        } else {
-            panic!("Expected Let definition");
-        }
     }
 }

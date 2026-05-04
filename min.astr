@@ -1,0 +1,2 @@
+\let circle_area(radius) = \pi * radius * radius
+@world Print( circle_area(5) )

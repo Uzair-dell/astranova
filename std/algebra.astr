@@ -1,0 +1,134 @@
+% Algebra branch – vectors, matrices, linear systems, quaternions
+% Uses tuples, get, and where for readability.
+
+\let approx_equal(a, b) = \abs(a - b) < 1.0e-12 * \max( \abs(a), \abs(b) )
+
+% -------- 2D vectors --------
+\let vec2(x, y) = (x, y)
+\let vec2_len(v) = \sqrt( get(v,0)*get(v,0) + get(v,1)*get(v,1) )
+\let vec2_dot(a, b) = get(a,0)*get(b,0) + get(a,1)*get(b,1)
+\let vec2_normalize(v) = ( get(v,0)/len, get(v,1)/len ) where len = vec2_len(v) + 1.0e-12
+\let vec2_scale(v, s) = ( get(v,0)*s, get(v,1)*s )
+\let vec2_add(a, b) = ( get(a,0)+get(b,0), get(a,1)+get(b,1) )
+\let vec2_sub(a, b) = ( get(a,0)-get(b,0), get(a,1)-get(b,1) )
+\let vec2_distance(a, b) = vec2_len( vec2_sub(a, b) )
+\let vec2_neg(v) = ( -get(v,0), -get(v,1) )
+
+% -------- 3D vectors --------
+\let vec3(x, y, z) = (x, y, z)
+\let vec3_len(v) = \sqrt( get(v,0)*get(v,0) + get(v,1)*get(v,1) + get(v,2)*get(v,2) )
+\let vec3_dot(a, b) = get(a,0)*get(b,0) + get(a,1)*get(b,1) + get(a,2)*get(b,2)
+\let vec3_cross(a, b) = (
+    get(a,1)*get(b,2) - get(a,2)*get(b,1),
+    get(a,2)*get(b,0) - get(a,0)*get(b,2),
+    get(a,0)*get(b,1) - get(a,1)*get(b,0)
+)
+\let vec3_normalize(v) = ( get(v,0)/len, get(v,1)/len, get(v,2)/len ) where len = vec3_len(v) + 1.0e-12
+\let vec3_scale(v, s) = ( get(v,0)*s, get(v,1)*s, get(v,2)*s )
+\let vec3_add(a, b) = ( get(a,0)+get(b,0), get(a,1)+get(b,1), get(a,2)+get(b,2) )
+\let vec3_sub(a, b) = ( get(a,0)-get(b,0), get(a,1)-get(b,1), get(a,2)-get(b,2) )
+\let vec3_neg(v) = ( -get(v,0), -get(v,1), -get(v,2) )
+\let vec3_distance(a, b) = vec3_len( vec3_sub(a, b) )
+
+% -------- 4D vectors --------
+\let vec4(x, y, z, w) = (x, y, z, w)
+\let vec4_len(v) = \sqrt( get(v,0)*get(v,0) + get(v,1)*get(v,1) + get(v,2)*get(v,2) + get(v,3)*get(v,3) )
+\let vec4_dot(a, b) = get(a,0)*get(b,0) + get(a,1)*get(b,1) + get(a,2)*get(b,2) + get(a,3)*get(b,3)
+\let vec4_normalize(v) = ( get(v,0)/len, get(v,1)/len, get(v,2)/len, get(v,3)/len ) where len = vec4_len(v) + 1.0e-12
+\let vec4_scale(v, s) = ( get(v,0)*s, get(v,1)*s, get(v,2)*s, get(v,3)*s )
+\let vec4_add(a, b) = ( get(a,0)+get(b,0), get(a,1)+get(b,1), get(a,2)+get(b,2), get(a,3)+get(b,3) )
+\let vec4_sub(a, b) = ( get(a,0)-get(b,0), get(a,1)-get(b,1), get(a,2)-get(b,2), get(a,3)-get(b,3) )
+\let vec4_neg(v) = ( -get(v,0), -get(v,1), -get(v,2), -get(v,3) )
+
+% -------- 2x2 matrices (row‑major) --------
+\let mat2x2(a,b, c,d) = (a,b, c,d)
+\let det2x2(M) = get(M,0)*get(M,3) - get(M,1)*get(M,2)
+\let mat2x2_mul(A, B) = (
+    get(A,0)*get(B,0) + get(A,1)*get(B,2),
+    get(A,0)*get(B,1) + get(A,1)*get(B,3),
+    get(A,2)*get(B,0) + get(A,3)*get(B,2),
+    get(A,2)*get(B,1) + get(A,3)*get(B,3)
+)
+\let mat2x2_transpose(M) = ( get(M,0), get(M,2), get(M,1), get(M,3) )
+\let mat2x2_inv(M) = ( get(M,3)/det, -get(M,1)/det, -get(M,2)/det, get(M,0)/det ) where det = det2x2(M) + 1.0e-12
+\let mat2x2_vec2_mul(M, v) = (
+    get(M,0)*get(v,0) + get(M,1)*get(v,1),
+    get(M,2)*get(v,0) + get(M,3)*get(v,1)
+)
+
+% -------- 3x3 matrices (row‑major) --------
+\let mat3x3(a11,a12,a13, a21,a22,a23, a31,a32,a33) = (a11,a12,a13, a21,a22,a23, a31,a32,a33)
+\let det3x3(M) =
+    get(M,0)*( get(M,4)*get(M,8) - get(M,5)*get(M,7) ) -
+    get(M,1)*( get(M,3)*get(M,8) - get(M,5)*get(M,6) ) +
+    get(M,2)*( get(M,3)*get(M,7) - get(M,4)*get(M,6) )
+\let mat3x3_vec3_mul(M, v) = (
+    get(M,0)*get(v,0) + get(M,1)*get(v,1) + get(M,2)*get(v,2),
+    get(M,3)*get(v,0) + get(M,4)*get(v,1) + get(M,5)*get(v,2),
+    get(M,6)*get(v,0) + get(M,7)*get(v,1) + get(M,8)*get(v,2)
+)
+\let mat3x3_transpose(M) = (
+    get(M,0), get(M,3), get(M,6),
+    get(M,1), get(M,4), get(M,7),
+    get(M,2), get(M,5), get(M,8)
+)
+
+% -------- 4x4 matrices (row‑major) --------
+\let mat4x4(a11,a12,a13,a14, a21,a22,a23,a24, a31,a32,a33,a34, a41,a42,a43,a44) =
+    (a11,a12,a13,a14, a21,a22,a23,a24, a31,a32,a33,a34, a41,a42,a43,a44)
+\let mat4x4_vec4_mul(M, v) = (
+    get(M,0)*get(v,0) + get(M,1)*get(v,1) + get(M,2)*get(v,2) + get(M,3)*get(v,3),
+    get(M,4)*get(v,0) + get(M,5)*get(v,1) + get(M,6)*get(v,2) + get(M,7)*get(v,3),
+    get(M,8)*get(v,0) + get(M,9)*get(v,1) + get(M,10)*get(v,2) + get(M,11)*get(v,3),
+    get(M,12)*get(v,0) + get(M,13)*get(v,1) + get(M,14)*get(v,2) + get(M,15)*get(v,3)
+)
+\let mat4x4_transpose(M) = (
+    get(M,0), get(M,4), get(M,8),  get(M,12),
+    get(M,1), get(M,5), get(M,9),  get(M,13),
+    get(M,2), get(M,6), get(M,10), get(M,14),
+    get(M,3), get(M,7), get(M,11), get(M,15)
+)
+
+% -------- Linear systems (Cramer) --------
+\let solve2x2(M, b) = ( (get(b,0)*get(M,3) - get(M,1)*get(b,1)) / det,
+                        (get(M,0)*get(b,1) - get(b,0)*get(M,2)) / det ) where det = det2x2(M) + 1.0e-12
+\let solve3x3(M, b) = (
+    det_col0 / det,
+    det_col1 / det,
+    det_col2 / det
+) where
+    det = det3x3(M) + 1.0e-12,
+    det_col0 = det3x3( (get(b,0), get(M,1), get(M,2), get(b,1), get(M,4), get(M,5), get(b,2), get(M,7), get(M,8)) ),
+    det_col1 = det3x3( (get(M,0), get(b,0), get(M,2), get(M,3), get(b,1), get(M,5), get(M,6), get(b,2), get(M,8)) ),
+    det_col2 = det3x3( (get(M,0), get(M,1), get(b,0), get(M,3), get(M,4), get(b,1), get(M,6), get(M,7), get(b,2)) )
+
+% -------- Quadratic with complex roots --------
+\let quadratic_roots(a, b, c) = \begin{cases}
+    ( -c/b, 0, -c/b, 0 ) & \abs(a) < 1.0e-12 \land \abs(b) > 1.0e-12 \\
+    ( 0,0,0,0 ) & \abs(a) < 1.0e-12 \land \abs(b) < 1.0e-12 \\
+    ( (-b + \sqrt(d))/(2*a), 0, (-b - \sqrt(d))/(2*a), 0 ) & d \ge 0 \\
+    ( -b/(2*a),  \sqrt(-d)/(2*a), -b/(2*a), -\sqrt(-d)/(2*a) ) & d < 0
+\end{cases} where d = b*b - 4*a*c
+
+% -------- Quaternions --------
+\let quat(a, b, c, d) = (a, b, c, d)
+\let quat_mul(p, q) = (
+    get(p,0)*get(q,0) - get(p,1)*get(q,1) - get(p,2)*get(q,2) - get(p,3)*get(q,3),
+    get(p,0)*get(q,1) + get(p,1)*get(q,0) + get(p,2)*get(q,3) - get(p,3)*get(q,2),
+    get(p,0)*get(q,2) - get(p,1)*get(q,3) + get(p,2)*get(q,0) + get(p,3)*get(q,1),
+    get(p,0)*get(q,3) + get(p,1)*get(q,2) - get(p,2)*get(q,1) + get(p,3)*get(q,0)
+)
+\let quat_conj(q) = ( get(q,0), -get(q,1), -get(q,2), -get(q,3) )
+\let quat_norm(q) = \sqrt( get(q,0)*get(q,0) + get(q,1)*get(q,1) + get(q,2)*get(q,2) + get(q,3)*get(q,3) )
+\let quat_normalize(q) = ( get(q,0)/n, get(q,1)/n, get(q,2)/n, get(q,3)/n ) where n = quat_norm(q) + 1.0e-12
+\let quat_rotate(q, v) = (
+    get(v,0)*(1 - 2*get(q,2)*get(q,2) - 2*get(q,3)*get(q,3)) +
+    get(v,1)*(2*get(q,1)*get(q,2) - 2*get(q,0)*get(q,3)) +
+    get(v,2)*(2*get(q,1)*get(q,3) + 2*get(q,0)*get(q,2)),
+    get(v,0)*(2*get(q,1)*get(q,2) + 2*get(q,0)*get(q,3)) +
+    get(v,1)*(1 - 2*get(q,1)*get(q,1) - 2*get(q,3)*get(q,3)) +
+    get(v,2)*(2*get(q,2)*get(q,3) - 2*get(q,0)*get(q,1)),
+    get(v,0)*(2*get(q,1)*get(q,3) - 2*get(q,0)*get(q,2)) +
+    get(v,1)*(2*get(q,2)*get(q,3) + 2*get(q,0)*get(q,1)) +
+    get(v,2)*(1 - 2*get(q,1)*get(q,1) - 2*get(q,2)*get(q,2))
+)

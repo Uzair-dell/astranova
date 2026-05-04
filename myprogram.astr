@@ -1,0 +1,26 @@
+\require std/algebra
+\require std/analysis
+\require std/geometry
+\require std/numtheory
+\require std/probability
+\require std/setlogic
+\require std/physics
+\require std/world
+
+\let v = (3, 4)
+\let l = vec2_len(v)
+@world Print(l)
+
+\let a = (1, 2, 3)
+\let b = (4, 5, 6)
+\let c = vec3_cross(a, b)
+@world Print( get(c,0) )
+@world Print( get(c,1) )
+@world Print( get(c,2) )
+
+\let M = mat2x2(1,2, 3,4)
+\let d = det2x2(M)
+@world Print(d)
+
+@world Print( circle_area(5) )
+@world Print( is_prime(17) )

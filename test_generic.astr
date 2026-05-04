@@ -1,0 +1,8 @@
+\require std/algebra
+
+\let a = (1, 2, 3)
+\let b = (4, 5, 6)
+
+% dot product over all elements (we know the length is 3)
+\let dot = \sum_{i=0}^{2} get(a, i) * get(b, i)
+@world Print(dot)

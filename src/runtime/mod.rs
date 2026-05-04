@@ -18,6 +18,18 @@ pub struct FSToken;
 #[derive(Debug, Clone)]
 pub struct MemToken;
 
+/// The un‑rejectable sovereign identity (𝕌).
+#[derive(Debug, Clone)]
+pub struct SovereignToken;
+
+/// Token for sandboxed meta‑operations.
+#[derive(Debug, Clone)]
+pub struct UnsafeToken;
+
+/// Placeholder token for a hardware enclave.
+#[derive(Debug, Clone)]
+pub struct EnclaveToken;
+
 // ========== C function declarations ==========
 extern "C" {
     fn world_print(msg: *const std::os::raw::c_char);
@@ -90,27 +102,12 @@ pub struct MemPtr(pub *mut std::ffi::c_void);
 unsafe impl Send for MemPtr {}
 unsafe impl Sync for MemPtr {}
 
-/// Allocate `size` bytes. Returns (WorldToken, MemPtr).
 pub fn alloc(world: WorldToken, _mem: &MemToken, size: usize) -> (WorldToken, MemPtr) {
     let ptr = unsafe { world_alloc(size) };
     (world, MemPtr(ptr))
 }
 
-/// Free a previously allocated pointer. Returns WorldToken.
 pub fn free(world: WorldToken, ptr: MemPtr) -> WorldToken {
     unsafe { world_free(ptr.0); }
     world
 }
-
-/// The un-rejectable sovereign identity (𝕌).
-/// Only the kernel can create this token; user code cannot.
-#[derive(Debug, Clone)]
-pub struct SovereignToken;
-/// Token needed for dangerous meta‑operations (e.g. @world Eval).
-/// Only the compiler bootstrap or the kernel should provide it.
-#[derive(Debug, Clone)]
-pub struct UnsafeToken;
-/// Placeholder token for a hardware enclave (homomorphic execution).
-/// If present, the entire computation is running inside a secure enclave.
-#[derive(Debug, Clone)]
-pub struct EnclaveToken;
