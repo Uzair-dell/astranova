@@ -34,11 +34,10 @@
         "start": { "node": "Number", "value": 1.0 },
         "end":   { "node": "Variable", "name": "__n" },
         "body": {
-          "node": "BinaryOp",
-          "op": "Pow",
-          "left":  { "node": "Variable", "name": "__i" },
-          "right": { "node": "Number", "value": 2.0 }
-        }
+           "node": "Pow",
+            "base": { "node": "Variable", "name": "__i" },
+           "exp":  { "node": "Number", "value": 2.0 }
+}
       },
       "rewrite": {
         "node": "BinaryOp",

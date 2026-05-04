@@ -105,11 +105,11 @@ fn binop_to_str(op: &BinOp) -> String {
 
 fn str_to_binop(s: &str) -> BinOp {
     match s {
-        "+" => BinOp::Add,
-        "-" => BinOp::Sub,
-        "*" => BinOp::Mul,
-        "/" => BinOp::Div,
-        "^" => BinOp::Pow,
+        "+" | "Add" => BinOp::Add,
+        "-" | "Sub" => BinOp::Sub,
+        "*" | "Mul" => BinOp::Mul,
+        "/" | "Div" => BinOp::Div,
+        "^" | "Pow" => BinOp::Pow,
         _ => panic!("Unknown binary operator in rewrite: {}", s),
     }
 }
