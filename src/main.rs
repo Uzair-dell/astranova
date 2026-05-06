@@ -5,7 +5,7 @@ use astranovac::lexer::lex;
 use astranovac::parser::Parser;
 use astranovac::codegen::Codegen;
 use astranovac::typecheck::{TypeEnv, TokenEnv, FnEnv, infer_definition};
-use astranovac::lexer::math_notation::lex_math;
+
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -60,11 +60,7 @@ fn main() {
         source = source.replace("__INPUT__", "\"\"");
     }
 
-    let tokens = if filename.ends_with(".astr2") {
-        lex_math(&source)
-    } else {
-        lex(&source)
-    };
+    let tokens = lex(&source);
     let mut parser = Parser::new(tokens);
     let mut program = parser.parse_program();
 

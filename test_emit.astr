@@ -1,0 +1,2 @@
+emit_line(0, "int main() { return 0; }")
+flush_lines(1)

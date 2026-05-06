@@ -1,6 +1,5 @@
 //! Astranova Lexer – converts raw source text into tokens.
-//! Supports % line comments, all LaTeX commands, and separates _ from command names.
-pub mod math_notation;
+//! Supports % line comments, all LaTeX commands, escape sequences in strings.
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
@@ -8,57 +7,12 @@ pub enum Token {
     Number(f64),
     StringLiteral(String),
     GreekLetter(String),
-
-    Let,
-    Const,
-    World,
-    Where,
-
-    LBrace,
-    RBrace,
-    LParen,
-    RParen,
-    LSquare,
-    RSquare,
-    Comma,
-    Semicolon,
-    Colon,
-    Underscore,
-    Backslash,
-
-    Plus,
-    Minus,
-    Star,
-    Slash,
-    Caret,
-    Times,
-    Cdot,
-
-    Eq,
-    Neq,
-    Lt,
-    Gt,
-    Le,
-    Ge,
-    And,
-    Or,
-
-    Equal,
-
-    Frac,
-    Sum,
-    Prod,
-    Int,
-    Lim,
-    Parallel,
-    CasesBegin,
-    CasesEnd,
-    Amp,
-    Dot,
-    QMark,          // ?  – compact cases introducer
-    Arrow,          // → – branch separator
-    // Kept for compatibility; no longer emitted by the lexer.
-    // Unit annotations are now parsed via LSquare/RSquare in the type parser.
+    Let, Const, World, Where,
+    LBrace, RBrace, LParen, RParen, LSquare, RSquare, Comma, Semicolon, Colon, Underscore, Backslash,
+    Plus, Minus, Star, Slash, Caret, Times, Cdot,
+    Eq, Neq, Lt, Gt, Le, Ge, And, Or,
+    Equal, Frac, Sum, Prod, Int, Lim, Parallel, CasesBegin, CasesEnd, Amp, Dot,
+    QMark, Arrow,
     UnitAnnotation(String),
 }
 
@@ -112,7 +66,7 @@ impl<'a> Lexer<'a> {
     fn read_command_name(&mut self) -> String {
         let start = self.pos;
         while let Some(c) = self.current_char() {
-            if c.is_alphabetic() {   // only letters, not digits or underscores
+            if c.is_alphabetic() {
                 self.advance();
             } else {
                 break;
@@ -133,24 +87,35 @@ impl<'a> Lexer<'a> {
 
     fn read_string_literal(&mut self) -> String {
         self.advance(); // skip opening quote
-        let start = self.pos;
-        while let Some(c) = self.current_char() {
-            // If we hit a backslash, skip it and whatever follows it
+        let mut result = String::new();
+        loop {
+            let Some(c) = self.current_char() else {
+                return result;
+            };
             if c == '\\' {
                 self.advance();          // skip the backslash
-                if self.current_char().is_some() {
+                if let Some(next) = self.current_char() {
+                    let converted = match next {
+                        'n'  => '\n',
+                        't'  => '\t',
+                        'r'  => '\r',
+                        '\\' => '\\',
+                        '"'  => '"',
+                        '0'  => '\0',
+                        other => other,
+                    };
+                    result.push(converted);
                     self.advance();      // skip the escaped character
                 }
-                continue;                // don't treat a closing quote inside an escape
+                continue;
             }
             if c == '"' {
-                let s = self.input[start..self.pos].to_string();
                 self.advance();          // skip closing quote
-                return s;
+                return result;
             }
+            result.push(c);
             self.advance();
         }
-        String::new()
     }
 
     fn next_token(&mut self) -> Option<Token> {
@@ -174,10 +139,9 @@ impl<'a> Lexer<'a> {
                 return Some(Token::Backslash);
             }
             let mut cmd = self.read_command_name();
-            // special handling for \begin{...} and \end{...}
             if cmd == "begin" || cmd == "end" {
                 if self.current_char() == Some('{') {
-                    self.advance(); // skip '{'
+                    self.advance();
                     let mut brace_content = String::new();
                     while let Some(c2) = self.current_char() {
                         if c2 == '}' { break; }
@@ -185,7 +149,7 @@ impl<'a> Lexer<'a> {
                         self.advance();
                     }
                     if self.current_char() == Some('}') {
-                        self.advance(); // skip '}'
+                        self.advance();
                     }
                     cmd = format!("{}{{{}}}", cmd, brace_content);
                 }
@@ -209,7 +173,7 @@ impl<'a> Lexer<'a> {
                 "land" => return Some(Token::And),
                 "lor"  => return Some(Token::Or),
                 "where" => return Some(Token::Where),
-                "" => { /* stray backslash – ignore and get next token */ return self.next_token(); }
+                "" => { return self.next_token(); }
                 _ => return Some(Token::GreekLetter(format!("\\{}", cmd))),
             }
         }
@@ -232,13 +196,11 @@ impl<'a> Lexer<'a> {
             return Some(Token::StringLiteral(self.read_string_literal()));
         }
 
-        // ---------- main match ----------
         match c {
             '{' => { self.advance(); return Some(Token::LBrace); }
             '}' => { self.advance(); return Some(Token::RBrace); }
             '(' => { self.advance(); return Some(Token::LParen); }
             ')' => { self.advance(); return Some(Token::RParen); }
-            // '[' now emits a simple LSquare – the parser handles the content
             '[' => { self.advance(); return Some(Token::LSquare); }
             ']' => { self.advance(); return Some(Token::RSquare); }
             ',' => { self.advance(); return Some(Token::Comma); }

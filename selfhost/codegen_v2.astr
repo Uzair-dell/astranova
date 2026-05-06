@@ -1,0 +1,21 @@
+% selfhost/codegen_v2.astr – programmatic C emitter (no string‑returning functions)
+
+\let three  = "3"
+\let four   = "4"
+\let two    = "2"
+\let inner  = concat( concat("(", three), concat(" + ", concat(four, ")")) )
+\let expr   = concat( concat("(", inner), concat(" * ", concat(two, ")")) )
+
+\let line1 = "#include <stdio.h>"
+\let line2 = "int main() {"
+\let line3 = concat("    double x = ", concat(expr, ";"))
+\let line4 = "    printf(\"%f\\n\", x);"
+\let line5 = "    return 0;"
+\let line6 = "}"
+
+@world Print(line1)
+@world Print(line2)
+@world Print(line3)
+@world Print(line4)
+@world Print(line5)
+@world Print(line6)

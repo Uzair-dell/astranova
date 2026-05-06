@@ -3,7 +3,8 @@
 //! Handles user‑defined functions, built‑ins, Cases, Assign, Block, and all primitives.
 //! Fixes: global variables, dynamic loop index substitution, string/tuple globals,
 //!        constant‑unrolling with full global visibility, array support,
-//!        proper C‑string escaping.
+//!        proper C‑string escaping, concat built‑in, string‑variable tracking,
+//!        and a line‑buffer for programmatic code generation.
 
 use crate::ast::{BinOp, Definition, Expr, UnOp};
 use std::collections::{HashMap, HashSet};
@@ -25,8 +26,10 @@ pub struct Codegen {
     last_result: Option<String>,
     functions: HashMap<String, (Vec<String>, Expr)>,
     funcrefs: HashMap<String, String>,
-    globals: HashSet<String>,
-    arrays: HashSet<String>,
+    globals: HashSet<String>,       // numeric globals (double)
+    arrays: HashSet<String>,        // array variables (double[])
+    string_vars: HashSet<String>,   // string variables (char[512])
+    line_buffer: Vec<String>,       // stores lines of C source code
 }
 
 impl Codegen {
@@ -40,6 +43,8 @@ impl Codegen {
             funcrefs: HashMap::new(),
             globals: HashSet::new(),
             arrays: HashSet::new(),
+            string_vars: HashSet::new(),
+            line_buffer: Vec::new(),
         }
     }
 
@@ -60,14 +65,22 @@ impl Codegen {
                     self.functions.insert(name.clone(), (params.clone(), body.clone()));
                 } else if !params.is_empty() {
                 } else if !name.is_empty() && name != "@world" {
-                    if !matches!(body, Expr::StringLiteral(_) | Expr::Tuple(_) | Expr::ArrayAlloc(_)) {
+                    // Only numeric globals are inserted here.
+                    // String/tuple/array alloc bodies are excluded.
+                    // Also exclude concat calls and string‑returning built‑ins.
+                    let is_string_call = if let Expr::FunctionCall { name: fname, .. } = body {
+                        fname == "concat" || fname == "emit_line" || fname == "flush_lines"
+                    } else {
+                        false
+                    };
+                    if !matches!(body, Expr::StringLiteral(_) | Expr::Tuple(_) | Expr::ArrayAlloc(_)) && !is_string_call {
                         self.globals.insert(name.clone());
                     }
                 }
             }
         }
 
-        // Emit global variable declarations
+        // Emit numeric global declarations
         for global in &self.globals {
             writeln!(self.code, "double {} = 0.0;", global).unwrap();
         }
@@ -81,15 +94,46 @@ impl Codegen {
                     if name.is_empty() {
                         self.compile_expr(body)?;
                     } else if name != "@world" {
+                        // ----- Array allocation -----
                         if let Expr::ArrayAlloc(size) = body {
                             writeln!(self.code, "    double {}[{}] = {{0}};", name, size).unwrap();
                             self.arrays.insert(name.clone());
-                        } else if let Expr::StringLiteral(s) = body {
-                            // Store JUST the raw string – no surrounding quotes, no C‑escaping.
-                            // Escaping will happen when the string is printed.
-                            self.locals.insert(name.clone(), s.clone());
+                        }
+                        // ----- String literal assignment -----
+                        else if let Expr::StringLiteral(s) = body {
+                            writeln!(self.code, "    char {}[512] = \"{}\";", name, c_escape(s)).unwrap();
+                            self.string_vars.insert(name.clone());
+                            self.locals.insert(name.clone(), name.clone());
                             self.last_result = Some(format!("\"{}\"", c_escape(s)));
-                        } else {
+                        }
+                        // ----- concat, emit_line, flush_lines or other function calls -----
+                        else if let Expr::FunctionCall { name: fname, args } = body {
+                            if fname == "concat" && args.len() == 2 {
+                                let s1 = self.compile_expr(&args[0])?;
+                                let s2 = self.compile_expr(&args[1])?;
+                                writeln!(self.code, "    char {}[512] = {{0}};", name).unwrap();
+                                writeln!(self.code, "    strcpy({}, {});", name, s1).unwrap();
+                                writeln!(self.code, "    strcat({}, {});", name, s2).unwrap();
+                                self.string_vars.insert(name.clone());
+                                self.locals.insert(name.clone(), name.clone());
+                                self.last_result = Some(format!("\"{}\"", ""));
+                            } else if fname == "emit_line" && args.len() == 2 {
+                                // emit_line is a void‑returning built‑in; handle it in compile_expr
+                                let _ = self.compile_expr(body)?;
+                            } else if fname == "flush_lines" && args.len() == 1 {
+                                let _ = self.compile_expr(body)?;
+                            } else {
+                                let val = self.compile_expr(body)?;
+                                if self.globals.contains(name.as_str()) {
+                                    writeln!(self.code, "    {} = {};", name, val).unwrap();
+                                } else {
+                                    self.locals.insert(name.clone(), val.clone());
+                                }
+                                self.last_result = Some(val);
+                            }
+                        }
+                        // ----- Numeric or other expression -----
+                        else {
                             let val = self.compile_expr(body)?;
                             if self.globals.contains(name.as_str()) {
                                 writeln!(self.code, "    {} = {};", name, val).unwrap();
@@ -105,27 +149,20 @@ impl Codegen {
                             }
                             Expr::FunctionCall { name: pname, args } if pname == "Print" && args.len() == 1 => {
                                 match &args[0] {
-                                    // literal string → %s with escaped content
                                     Expr::StringLiteral(msg) => {
                                         writeln!(self.code, "    printf(\"%s\\n\", \"{}\");", c_escape(msg)).unwrap();
                                     }
-                                    // variable that holds a RAW STRING → re‑escape and print
                                     Expr::Variable(vname) => {
-                                        if let Some(raw) = self.locals.get(vname) {
-                                            // If the raw value looks like a raw string (not a numeric),
-                                            // treat it as a string and escape it.
-                                            if !raw.parse::<f64>().is_ok() && !self.globals.contains(vname) {
-                                                writeln!(self.code, "    printf(\"%s\\n\", \"{}\");", c_escape(raw)).unwrap();
-                                            } else {
-                                                let val = self.compile_expr(&args[0])?;
-                                                writeln!(self.code, "    printf(\"%f\\n\", {});", val).unwrap();
-                                            }
+                                        if self.string_vars.contains(vname) {
+                                            writeln!(self.code, "    printf(\"%s\\n\", {});", vname).unwrap();
+                                        } else if let Some(_) = self.locals.get(vname) {
+                                            let val = self.compile_expr(&args[0])?;
+                                            writeln!(self.code, "    printf(\"%f\\n\", {});", val).unwrap();
                                         } else {
                                             let val = self.compile_expr(&args[0])?;
                                             writeln!(self.code, "    printf(\"%f\\n\", {});", val).unwrap();
                                         }
                                     }
-                                    // any other expression → %f
                                     _ => {
                                         let val = self.compile_expr(&args[0])?;
                                         writeln!(self.code, "    printf(\"%f\\n\", {});", val).unwrap();
@@ -145,6 +182,7 @@ impl Codegen {
             }
         }
 
+        // Print final result only for numeric values
         if let Some(ref last) = self.last_result {
             if !last.starts_with('"') {
                 writeln!(self.code, "    printf(\"result = %f\\n\", {});", last).unwrap();
@@ -165,6 +203,8 @@ impl Codegen {
                 if self.globals.contains(name) {
                     Ok(name.clone())
                 } else if self.arrays.contains(name) {
+                    Ok(name.clone())
+                } else if self.string_vars.contains(name) {
                     Ok(name.clone())
                 } else {
                     self.locals.get(name).cloned()
@@ -211,7 +251,39 @@ impl Codegen {
                     let idx = self.compile_expr(&args[1])?;
                     return Ok(format!("({})[(int)({})]", tuple, idx));
                 }
-
+                // concat(s1, s2)
+                if name == "concat" && args.len() == 2 {
+                    let s1 = self.compile_expr(&args[0])?;
+                    let s2 = self.compile_expr(&args[1])?;
+                    let result = self.fresh("concat");
+                    writeln!(self.code, "    char {}[512] = {{0}};", result).unwrap();
+                    writeln!(self.code, "    strcpy({}, {});", result, s1).unwrap();
+                    writeln!(self.code, "    strcat({}, {});", result, s2).unwrap();
+                    return Ok(result);
+                }
+                // emit_line(index, text) – store a C source line in the buffer
+                if name == "emit_line" && args.len() == 2 {
+                    let idx_str = self.compile_expr(&args[0])?;
+                    let txt = self.compile_expr(&args[1])?;
+                    let raw = txt.trim_matches('"').to_string();
+                    let idx: usize = idx_str.parse().unwrap_or(0);
+                    if idx >= self.line_buffer.len() {
+                        self.line_buffer.resize(idx + 1, String::new());
+                    }
+                    self.line_buffer[idx] = raw;
+                    return Ok("0".to_string());
+                }
+                // flush_lines(count) – emit all stored lines into the C file
+                if name == "flush_lines" && args.len() == 1 {
+                    let count_str = self.compile_expr(&args[0])?;
+                    let count: usize = count_str.parse().unwrap_or(0);
+                    for i in 0..count {
+                        if let Some(line) = self.line_buffer.get(i) {
+                            writeln!(self.code, "    printf(\"%s\\n\", \"{}\");", line).unwrap();
+                        }
+                    }
+                    return Ok("0".to_string());
+                }
                 // built‑in math functions
                 let builtins = ["sin","cos","log","sqrt","abs","pow","\\sin","\\cos","\\log","\\sqrt","\\abs"];
                 let func_name = name.trim_start_matches('\\');

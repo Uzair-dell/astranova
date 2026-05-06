@@ -1,4 +1,4 @@
 % codegen_demo.astr – generate C code that prints 10.0
 
-\let c_program = "int main() { printf(\"%f\\n\", 10.0); return 0; }"
+\let c_program = "#include <stdio.h>\nint main() { printf(\"%f\\n\", 10.0); return 0; }"
 @world Print(c_program)

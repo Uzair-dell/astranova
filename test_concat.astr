@@ -1,0 +1,4 @@
+\let hello = "Hello, "
+\let world = "world!"
+\let greeting = concat(hello, world)
+@world Print(greeting)

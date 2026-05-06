@@ -1,0 +1,13 @@
+% selfhost/codegen_v3.astr – generic text‑buffer code generator
+
+\let inner = concat( concat("(", "3"), concat(" + ", concat("4", ")")) )
+\let expr  = concat( concat("(", inner), concat(" * ", concat("2", ")")) )
+
+emit_line(0, "#include <stdio.h>")
+emit_line(1, "int main() {")
+emit_line(2, concat("    double x = ", concat(expr, ";")))
+emit_line(3, "    printf(\"%f\\n\", x);")
+emit_line(4, "    return 0;")
+emit_line(5, "}")
+
+flush_lines(6)

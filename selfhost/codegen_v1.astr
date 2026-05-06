@@ -1,0 +1,13 @@
+\let line1 = "#include <stdio.h>"
+\let line2 = "int main() {"
+\let line3 = "    double x = (3+4)*2;"
+\let line4 = "    printf(\"%f\\n\", x);"
+\let line5 = "    return 0;"
+\let line6 = "}"
+
+@world Print(line1)
+@world Print(line2)
+@world Print(line3)
+@world Print(line4)
+@world Print(line5)
+@world Print(line6)

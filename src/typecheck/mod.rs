@@ -1,5 +1,5 @@
-//! Astranova Type Checker – Physics Hat, Security Tokens, 𝕌,
-//! plus String, user‑defined functions, and all self‑hosted constructs.
+//! Astranova Type Checker – Physics Hat, Security Tokens, and 𝕌.
+//! Extended: \let, \sum, \cases, Assignment, Subscript, concat, emit_line, flush_lines.
 
 use crate::ast::{Expr, BinOp, Type, Definition};
 use std::collections::{HashMap, HashSet};
@@ -31,7 +31,7 @@ pub fn infer(
 ) -> Result<Type, TypeError> {
     match expr {
         Expr::Number(_) => Ok(Type::Scalar(None)),
-        Expr::StringLiteral(_) => Ok(Type::String),   // ← NEW
+        Expr::StringLiteral(_) => Ok(Type::String),
 
         Expr::Variable(name) => env.get(name).cloned()
             .ok_or_else(|| TypeError::UnboundVariable(name.clone())),
@@ -54,7 +54,6 @@ pub fn infer(
                     _ => Err(TypeError::NotScalar { found: lt }),
                 }
             }
-
             BinOp::Mul => {
                 let lt = infer(left, env, tokens, fns)?;
                 let rt = infer(right, env, tokens, fns)?;
@@ -77,6 +76,14 @@ pub fn infer(
                     _ => Err(TypeError::NotScalar { found: lt }),
                 }
             }
+            BinOp::And | BinOp::Or => {
+                let lt = infer(left, env, tokens, fns)?;
+                let rt = infer(right, env, tokens, fns)?;
+                if lt != Type::Scalar(None) || rt != Type::Scalar(None) {
+                    return Err(TypeError::NotScalar { found: lt });
+                }
+                Ok(Type::Scalar(None))
+            }
             BinOp::Eq | BinOp::Neq | BinOp::Lt | BinOp::Gt | BinOp::Le | BinOp::Ge => {
                 let lt = infer(left, env, tokens, fns)?;
                 let rt = infer(right, env, tokens, fns)?;
@@ -85,15 +92,6 @@ pub fn infer(
                 } else {
                     Ok(Type::Scalar(None))
                 }
-            }
-                        BinOp::And | BinOp::Or => {
-                let lt = infer(left, env, tokens, fns)?;
-                let rt = infer(right, env, tokens, fns)?;
-                // Both sides must be dimensionless scalars (booleans)
-                if lt != Type::Scalar(None) || rt != Type::Scalar(None) {
-                    return Err(TypeError::NotScalar { found: lt });
-                }
-                Ok(Type::Scalar(None))
             }
             _ => Err(TypeError::UnsupportedOperation(format!("{op:?} not yet type‑checked"))),
         },
@@ -107,8 +105,7 @@ pub fn infer(
                 Expr::FunctionCall { name, args } if name == "Print" && args.len() == 1 => {
                     let arg_ty = infer(&args[0], env, tokens, fns)?;
                     match arg_ty {
-                        Type::Scalar(_) => Ok(Type::Scalar(None)),
-                        Type::String => Ok(Type::Scalar(None)),  // allow printing strings
+                        Type::Scalar(_) | Type::String => Ok(Type::Scalar(None)),
                         _ => Err(TypeError::NotScalar { found: arg_ty }),
                     }
                 }
@@ -140,8 +137,39 @@ pub fn infer(
             }
             // Built‑in tuple functions
             if (name == "tlen" || name == "get") && args.len() == 2 {
-                // simplified: allow any scalar args
                 for a in args { let _ = infer(a, env, tokens, fns)?; }
+                return Ok(Type::Scalar(None));
+            }
+            // concat(s1, s2) – returns a string
+            if name == "concat" && args.len() == 2 {
+                let t1 = infer(&args[0], env, tokens, fns)?;
+                let t2 = infer(&args[1], env, tokens, fns)?;
+                if t1 != Type::String || t2 != Type::String {
+                    return Err(TypeError::TypeMismatch {
+                        expected: Type::String,
+                        found: if t1 != Type::String { t1 } else { t2 },
+                    });
+                }
+                return Ok(Type::String);
+            }
+            // emit_line(index, text) – void function, returns Scalar(None)
+            if name == "emit_line" && args.len() == 2 {
+                let t1 = infer(&args[0], env, tokens, fns)?;
+                let t2 = infer(&args[1], env, tokens, fns)?;
+                if t1 != Type::Scalar(None) || t2 != Type::String {
+                    return Err(TypeError::TypeMismatch {
+                        expected: Type::Scalar(None),
+                        found: if t1 != Type::Scalar(None) { t1 } else { t2 },
+                    });
+                }
+                return Ok(Type::Scalar(None));
+            }
+            // flush_lines(count) – void function, returns Scalar(None)
+            if name == "flush_lines" && args.len() == 1 {
+                let t = infer(&args[0], env, tokens, fns)?;
+                if t != Type::Scalar(None) {
+                    return Err(TypeError::NotScalar { found: t });
+                }
                 return Ok(Type::Scalar(None));
             }
             // Built‑in math
@@ -310,13 +338,9 @@ pub fn infer_definition(
     fns: &mut FnEnv,
 ) -> Result<Type, TypeError> {
     match def {
-            Definition::Let { name, params, body, is_func: _, .. } => {
+        Definition::Let { name, params, body, is_func: _, .. } => {
             if !params.is_empty() {
-                // Function definition: store in fns, don't infer body now
                 fns.insert(name.clone(), (params.clone(), body.clone()));
-                // Return a Function type (approx)
-                // Could be more precise after we infer the body later
-                // For now, return a dummy
                 Ok(Type::Function(Box::new(Type::Scalar(None)), Box::new(Type::Scalar(None))))
             } else {
                 let body_ty = infer(body, env, tokens, fns)?;
