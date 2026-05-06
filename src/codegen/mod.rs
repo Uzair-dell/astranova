@@ -2,11 +2,21 @@
 //! Produces a .c file that can be compiled with any C compiler.
 //! Handles user‑defined functions, built‑ins, Cases, Assign, Block, and all primitives.
 //! Fixes: global variables, dynamic loop index substitution, string/tuple globals,
-//!        constant‑unrolling with full global visibility, array support.
+//!        constant‑unrolling with full global visibility, array support,
+//!        proper C‑string escaping.
 
 use crate::ast::{BinOp, Definition, Expr, UnOp};
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
+
+/// Escape a string so it can be placed inside a C‑style `"…"` literal.
+fn c_escape(s: &str) -> String {
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t")
+}
 
 pub struct Codegen {
     code: String,
@@ -15,11 +25,9 @@ pub struct Codegen {
     last_result: Option<String>,
     functions: HashMap<String, (Vec<String>, Expr)>,
     funcrefs: HashMap<String, String>,
-    globals: HashSet<String>, // names of C global variables
-     arrays: HashSet<String>,
-
+    globals: HashSet<String>,
+    arrays: HashSet<String>,
 }
-
 
 impl Codegen {
     pub fn new() -> Self {
@@ -51,9 +59,7 @@ impl Codegen {
                 if *is_func {
                     self.functions.insert(name.clone(), (params.clone(), body.clone()));
                 } else if !params.is_empty() {
-                    // zero‑parameter functions are already handled above
                 } else if !name.is_empty() && name != "@world" {
-                    // Only make it a global if the body is NOT a string literal AND NOT a tuple AND NOT an array alloc
                     if !matches!(body, Expr::StringLiteral(_) | Expr::Tuple(_) | Expr::ArrayAlloc(_)) {
                         self.globals.insert(name.clone());
                     }
@@ -70,22 +76,19 @@ impl Codegen {
         // Second pass: evaluate definitions
         for def in definitions {
             match def {
-                Definition::Let { name, params, body, is_func } if *is_func => {
-                    // function definitions are stored, nothing to emit here
-                }
+                Definition::Let { name, params, body, is_func } if *is_func => {}
                 Definition::Let { name, params, body, is_func } if params.is_empty() && !*is_func => {
                     if name.is_empty() {
-                        // top‑level expression statement
                         self.compile_expr(body)?;
                     } else if name != "@world" {
-                        // Handle ArrayAlloc specially
                         if let Expr::ArrayAlloc(size) = body {
                             writeln!(self.code, "    double {}[{}] = {{0}};", name, size).unwrap();
                             self.arrays.insert(name.clone());
                         } else if let Expr::StringLiteral(s) = body {
-                            let escaped = format!("\"{}\"", s);
-                            self.locals.insert(name.clone(), escaped.clone());
-                            self.last_result = Some(escaped);
+                            // Store JUST the raw string – no surrounding quotes, no C‑escaping.
+                            // Escaping will happen when the string is printed.
+                            self.locals.insert(name.clone(), s.clone());
+                            self.last_result = Some(format!("\"{}\"", c_escape(s)));
                         } else {
                             let val = self.compile_expr(body)?;
                             if self.globals.contains(name.as_str()) {
@@ -97,10 +100,37 @@ impl Codegen {
                         }
                     } else if let Expr::WorldPragma(inner) = body {
                         match &**inner {
-                            Expr::StringLiteral(msg) => writeln!(self.code, "    world_print(\"{}\");", msg).unwrap(),
+                            Expr::StringLiteral(msg) => {
+                                writeln!(self.code, "    world_print(\"{}\");", c_escape(msg)).unwrap();
+                            }
                             Expr::FunctionCall { name: pname, args } if pname == "Print" && args.len() == 1 => {
-                                let val = self.compile_expr(&args[0])?;
-                                writeln!(self.code, "    printf(\"%f\\n\", {});", val).unwrap();
+                                match &args[0] {
+                                    // literal string → %s with escaped content
+                                    Expr::StringLiteral(msg) => {
+                                        writeln!(self.code, "    printf(\"%s\\n\", \"{}\");", c_escape(msg)).unwrap();
+                                    }
+                                    // variable that holds a RAW STRING → re‑escape and print
+                                    Expr::Variable(vname) => {
+                                        if let Some(raw) = self.locals.get(vname) {
+                                            // If the raw value looks like a raw string (not a numeric),
+                                            // treat it as a string and escape it.
+                                            if !raw.parse::<f64>().is_ok() && !self.globals.contains(vname) {
+                                                writeln!(self.code, "    printf(\"%s\\n\", \"{}\");", c_escape(raw)).unwrap();
+                                            } else {
+                                                let val = self.compile_expr(&args[0])?;
+                                                writeln!(self.code, "    printf(\"%f\\n\", {});", val).unwrap();
+                                            }
+                                        } else {
+                                            let val = self.compile_expr(&args[0])?;
+                                            writeln!(self.code, "    printf(\"%f\\n\", {});", val).unwrap();
+                                        }
+                                    }
+                                    // any other expression → %f
+                                    _ => {
+                                        let val = self.compile_expr(&args[0])?;
+                                        writeln!(self.code, "    printf(\"%f\\n\", {});", val).unwrap();
+                                    }
+                                }
                             }
                             _ => {}
                         }
@@ -116,7 +146,9 @@ impl Codegen {
         }
 
         if let Some(ref last) = self.last_result {
-            writeln!(self.code, "    printf(\"result = %f\\n\", {});", last).unwrap();
+            if !last.starts_with('"') {
+                writeln!(self.code, "    printf(\"result = %f\\n\", {});", last).unwrap();
+            }
         }
 
         self.code.push_str("    return 0;\n}\n");
@@ -126,19 +158,20 @@ impl Codegen {
     fn compile_expr(&mut self, expr: &Expr) -> Result<String, String> {
         match expr {
             Expr::Number(n) => Ok(format!("{:.10}", n)),
-            Expr::StringLiteral(s) => Ok(format!("\"{}\"", s)),
+            Expr::StringLiteral(s) => Ok(format!("\"{}\"", c_escape(s))),
 
             // ---------- Variable ----------
- Expr::Variable(name) => {
-    if self.globals.contains(name) {
-        Ok(name.clone())
-    } else if self.arrays.contains(name) {
-        Ok(name.clone())   // yes, it's an array – just return its name
-    } else {
-        self.locals.get(name).cloned()
-            .ok_or_else(|| format!("Undefined variable '{}'", name))
-    }
-}
+            Expr::Variable(name) => {
+                if self.globals.contains(name) {
+                    Ok(name.clone())
+                } else if self.arrays.contains(name) {
+                    Ok(name.clone())
+                } else {
+                    self.locals.get(name).cloned()
+                        .ok_or_else(|| format!("Undefined variable '{}'", name))
+                }
+            }
+
             Expr::GreekLetter(g) => {
                 let val = match g.as_str() {
                     "\\pi" => std::f64::consts::PI,
@@ -237,7 +270,6 @@ impl Codegen {
             Expr::Assign { var, value } => {
                 let val = self.compile_expr(value)?;
                 if self.globals.contains(var.as_str()) {
-                    // Direct C assignment to global
                     writeln!(self.code, "    {} = {};", var, val).unwrap();
                 } else {
                     self.locals.insert(var.clone(), val.clone());
@@ -314,105 +346,99 @@ impl Codegen {
                 Ok(result)
             }
 
-            // ---------- Sum (with constant‑unrolling) ----------
-             // ---------- Sum (with limited constant‑unrolling) ----------
-Expr::Sum { index, start, end, body } => {
-    let start_val = self.compile_expr(start)?;
-    let end_val = self.compile_expr(end)?;
+            // ---------- Sum (with limited constant‑unrolling) ----------
+            Expr::Sum { index, start, end, body } => {
+                let start_val = self.compile_expr(start)?;
+                let end_val = self.compile_expr(end)?;
 
-    // Constant‑unrolling only for tiny loops (≤ 8 iterations)
-    if let (Expr::Number(start_n), Expr::Number(end_n)) = (start.as_ref(), end.as_ref()) {
-        let n_iter = (*end_n - *start_n) as i64 + 1;
-        if n_iter <= 8 {
-            let result = self.fresh("sum");
-            writeln!(self.code, "    double {} = 0.0;", result).unwrap();
-            let mut i_val = *start_n;
+                if let (Expr::Number(start_n), Expr::Number(end_n)) = (start.as_ref(), end.as_ref()) {
+                    let n_iter = (*end_n - *start_n) as i64 + 1;
+                    if n_iter <= 8 {
+                        let result = self.fresh("sum");
+                        writeln!(self.code, "    double {} = 0.0;", result).unwrap();
+                        let mut i_val = *start_n;
 
-            // Insert loop index and all globals before compiling body
-            self.locals.insert(index.clone(), format!("{:.10}", i_val));
-            for g in self.globals.clone() {
-                if !self.locals.contains_key(&g) {
-                    self.locals.insert(g.clone(), g.clone());
+                        self.locals.insert(index.clone(), format!("{:.10}", i_val));
+                        for g in self.globals.clone() {
+                            if !self.locals.contains_key(&g) {
+                                self.locals.insert(g.clone(), g.clone());
+                            }
+                        }
+
+                        for _ in 0..n_iter {
+                            let body_val = self.compile_expr(body)?;
+                            writeln!(self.code, "    {} += {};", result, body_val).unwrap();
+                            i_val += 1.0;
+                            self.locals.insert(index.clone(), format!("{:.10}", i_val));
+                        }
+                        self.locals.remove(index);
+                        return Ok(result);
+                    }
                 }
-            }
 
-            for _ in 0..n_iter {
+                let result = self.fresh("sum");
+                self.locals.insert(index.clone(), index.clone());
+                writeln!(self.code, "    double {} = 0.0;", result).unwrap();
+                writeln!(self.code, "    for (int {} = (int)({}); {} <= (int)({}); {}++) {{",
+                         index, start_val, index, end_val, index).unwrap();
+                for g in self.globals.clone() {
+                    if !self.locals.contains_key(&g) {
+                        self.locals.insert(g.clone(), g.clone());
+                    }
+                }
                 let body_val = self.compile_expr(body)?;
-                writeln!(self.code, "    {} += {};", result, body_val).unwrap();
-                i_val += 1.0;
-                self.locals.insert(index.clone(), format!("{:.10}", i_val));
+                writeln!(self.code, "        {} += {};", result, body_val).unwrap();
+                writeln!(self.code, "    }}").unwrap();
+                self.locals.remove(index);
+                Ok(result)
             }
-            self.locals.remove(index);
-            return Ok(result);
-        }
-    }
 
-    // Dynamic loop (for larger or non‑constant bounds)
-    let result = self.fresh("sum");
-    self.locals.insert(index.clone(), index.clone());
-    writeln!(self.code, "    double {} = 0.0;", result).unwrap();
-    writeln!(self.code, "    for (int {} = (int)({}); {} <= (int)({}); {}++) {{",
-             index, start_val, index, end_val, index).unwrap();
-    // Make all globals visible inside the loop body
-    for g in self.globals.clone() {
-        if !self.locals.contains_key(&g) {
-            self.locals.insert(g.clone(), g.clone());
-        }
-    }
-    let body_val = self.compile_expr(body)?;
-    writeln!(self.code, "        {} += {};", result, body_val).unwrap();
-    writeln!(self.code, "    }}").unwrap();
-    self.locals.remove(index);
-    Ok(result)
-}
-
-            // ---------- Prod (with constant‑unrolling) ----------
             // ---------- Prod (with limited constant‑unrolling) ----------
-Expr::Prod { index, start, end, body } => {
-    let start_val = self.compile_expr(start)?;
-    let end_val = self.compile_expr(end)?;
+            Expr::Prod { index, start, end, body } => {
+                let start_val = self.compile_expr(start)?;
+                let end_val = self.compile_expr(end)?;
 
-    if let (Expr::Number(start_n), Expr::Number(end_n)) = (start.as_ref(), end.as_ref()) {
-        let n_iter = (*end_n - *start_n) as i64 + 1;
-        if n_iter <= 8 {
-            let result = self.fresh("prod");
-            writeln!(self.code, "    double {} = 1.0;", result).unwrap();
-            let mut i_val = *start_n;
+                if let (Expr::Number(start_n), Expr::Number(end_n)) = (start.as_ref(), end.as_ref()) {
+                    let n_iter = (*end_n - *start_n) as i64 + 1;
+                    if n_iter <= 8 {
+                        let result = self.fresh("prod");
+                        writeln!(self.code, "    double {} = 1.0;", result).unwrap();
+                        let mut i_val = *start_n;
 
-            self.locals.insert(index.clone(), format!("{:.10}", i_val));
-            for g in self.globals.clone() {
-                if !self.locals.contains_key(&g) {
-                    self.locals.insert(g.clone(), g.clone());
+                        self.locals.insert(index.clone(), format!("{:.10}", i_val));
+                        for g in self.globals.clone() {
+                            if !self.locals.contains_key(&g) {
+                                self.locals.insert(g.clone(), g.clone());
+                            }
+                        }
+
+                        for _ in 0..n_iter {
+                            let body_val = self.compile_expr(body)?;
+                            writeln!(self.code, "    {} *= {};", result, body_val).unwrap();
+                            i_val += 1.0;
+                            self.locals.insert(index.clone(), format!("{:.10}", i_val));
+                        }
+                        self.locals.remove(index);
+                        return Ok(result);
+                    }
                 }
-            }
 
-            for _ in 0..n_iter {
+                let result = self.fresh("prod");
+                self.locals.insert(index.clone(), index.clone());
+                writeln!(self.code, "    double {} = 1.0;", result).unwrap();
+                writeln!(self.code, "    for (int {} = (int)({}); {} <= (int)({}); {}++) {{",
+                         index, start_val, index, end_val, index).unwrap();
+                for g in self.globals.clone() {
+                    if !self.locals.contains_key(&g) {
+                        self.locals.insert(g.clone(), g.clone());
+                    }
+                }
                 let body_val = self.compile_expr(body)?;
-                writeln!(self.code, "    {} *= {};", result, body_val).unwrap();
-                i_val += 1.0;
-                self.locals.insert(index.clone(), format!("{:.10}", i_val));
+                writeln!(self.code, "        {} *= {};", result, body_val).unwrap();
+                writeln!(self.code, "    }}").unwrap();
+                self.locals.remove(index);
+                Ok(result)
             }
-            self.locals.remove(index);
-            return Ok(result);
-        }
-    }
-
-    let result = self.fresh("prod");
-    self.locals.insert(index.clone(), index.clone());
-    writeln!(self.code, "    double {} = 1.0;", result).unwrap();
-    writeln!(self.code, "    for (int {} = (int)({}); {} <= (int)({}); {}++) {{",
-             index, start_val, index, end_val, index).unwrap();
-    for g in self.globals.clone() {
-        if !self.locals.contains_key(&g) {
-            self.locals.insert(g.clone(), g.clone());
-        }
-    }
-    let body_val = self.compile_expr(body)?;
-    writeln!(self.code, "        {} *= {};", result, body_val).unwrap();
-    writeln!(self.code, "    }}").unwrap();
-    self.locals.remove(index);
-    Ok(result)
-}
 
             Expr::Parallel(exprs) => {
                 let result = self.fresh("parallel");

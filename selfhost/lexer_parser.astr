@@ -1,6 +1,6 @@
 % Self‑hosted Astranova Lexer + Parser – type‑check safe ordering
 % Scans "12 + 34 * 2", builds token table, evaluates to 80.
-
+\require std/math
 \let source = "12 + 34 * 2"
 \let src_len = length(source)
 
@@ -37,13 +37,7 @@
     0 & 1
 \end{cases}
 
-% ---------- Power of 10 helper ----------
-\let power10(n) = \begin{cases}
-    1    & n == 0 \\
-    10   & n == 1 \\
-    100  & n == 2 \\
-    1000 & 1
-\end{cases}
+
 
 % ---------- LEXER LOOP ----------
 \let dummy1 = \sum_{step=1}^{20}

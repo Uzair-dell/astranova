@@ -1,0 +1,2 @@
+\let result = 3 + 4 * 2
+@world Print(result)

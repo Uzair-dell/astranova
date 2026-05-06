@@ -4,30 +4,32 @@
 
 void world_print(const char* msg) { printf("%s\n", msg); }
 
-double length = 0.0;
-double mul_result = 0.0;
-double result = 0.0;
 double TOK_MUL = 0.0;
-double TOK_MINUS = 0.0;
-double TOK_NUMBER = 0.0;
-double val1 = 0.0;
-double num_end0 = 0.0;
-double val2 = 0.0;
-double num_start0 = 0.0;
-double type = 0.0;
-double num_tokens = 0.0;
-double num_start2 = 0.0;
-double val3 = 0.0;
-double pos = 0.0;
-double start = 0.0;
-double TOK_DIV = 0.0;
-double dummy1 = 0.0;
-double num_end2 = 0.0;
-double TOK_PLUS = 0.0;
-double src_len = 0.0;
 double end = 0.0;
-double num_start4 = 0.0;
+double num_start2 = 0.0;
+double TOK_PLUS = 0.0;
+double num_end2 = 0.0;
+double pos = 0.0;
+double final_result = 0.0;
+double TOK_DIV = 0.0;
+double acc = 0.0;
+double cur_val = 0.0;
+double type = 0.0;
+double num_end0 = 0.0;
 double num_end4 = 0.0;
+double src_len = 0.0;
+double TOK_MINUS = 0.0;
+double dummy1 = 0.0;
+double TOK_NUMBER = 0.0;
+double start = 0.0;
+double num_tokens = 0.0;
+double num_start0 = 0.0;
+double num_start4 = 0.0;
+double op = 0.0;
+double next_val = 0.0;
+double stop = 0.0;
+double length = 0.0;
+double dummy3 = 0.0;
 
 int main() {
     double len0 = (double)strlen("12 + 34 * 2");
@@ -289,31 +291,67 @@ int main() {
         sum137 += binop146;
     }
     num_values[(int)4.0000000000] = sum137;
-    double arr147 = tokens[(int)0.0000000000];
-    printf("%f\n", arr147);
-    double arr148 = tokens[(int)3.0000000000];
-    printf("%f\n", arr148);
-    double arr149 = tokens[(int)6.0000000000];
-    printf("%f\n", arr149);
-    double arr150 = tokens[(int)9.0000000000];
-    printf("%f\n", arr150);
-    double arr151 = tokens[(int)12.0000000000];
-    printf("%f\n", arr151);
-    double arr152 = num_values[(int)0.0000000000];
-    printf("%f\n", arr152);
-    double arr153 = num_values[(int)2.0000000000];
-    printf("%f\n", arr153);
-    double arr154 = num_values[(int)0.0000000000];
-    val1 = arr154;
-    double arr155 = num_values[(int)2.0000000000];
-    val2 = arr155;
-    double arr156 = num_values[(int)4.0000000000];
-    val3 = arr156;
-    double binop157 = val2 * val3;
-    mul_result = binop157;
-    double binop158 = val1 + mul_result;
-    result = binop158;
-    printf("%f\n", result);
-    printf("result = %f\n", binop158);
+    double arr147 = num_values[(int)0.0000000000];
+    cur_val = arr147;
+    acc = 0.0000000000;
+    op = 0.0000000000;
+    next_val = 0.0000000000;
+    stop = 0.0000000000;
+    double sum148 = 0.0;
+    for (int i = (int)(1.0000000000); i <= (int)(10.0000000000); i++) {
+    double cases149;
+    double binop150 = i < num_tokens;
+    if (binop150) {
+        cases149 = 1.0000000000;
+    } else if (1.0000000000) {
+        cases149 = 0.0000000000;
+    } else { cases149 = 0.0; }
+    stop = cases149;
+    double cases151;
+    double binop152 = stop == 1.0000000000;
+    if (binop152) {
+    double binop153 = i * 3.0000000000;
+    double arr154 = tokens[(int)binop153];
+    op = arr154;
+    double binop155 = i + 1.0000000000;
+    double arr156 = num_values[(int)binop155];
+    next_val = arr156;
+    double cases157;
+    double binop158 = op == TOK_PLUS;
+    double binop159 = op == TOK_MINUS;
+    double binop160 = binop158 || binop159;
+    if (binop160) {
+        cases157 = cur_val;
+    } else if (1.0000000000) {
+        cases157 = 0.0000000000;
+    } else { cases157 = 0.0; }
+    double binop161 = acc + cases157;
+    acc = binop161;
+    double cases162;
+    double binop163 = op == TOK_PLUS;
+    double binop164 = op == TOK_MINUS;
+    double binop165 = binop163 || binop164;
+    double binop166 = op == TOK_MUL;
+    double binop167 = op == TOK_DIV;
+    double binop168 = binop166 || binop167;
+    if (binop165) {
+        cases162 = next_val;
+    } else if (binop168) {
+    double binop169 = cur_val * next_val;
+        cases162 = binop169;
+    } else if (1.0000000000) {
+        cases162 = cur_val;
+    } else { cases162 = 0.0; }
+    cur_val = cases162;
+        cases151 = 0.0000000000;
+    } else { cases151 = 0.0; }
+        sum148 += 0.0000000000;
+    }
+    dummy3 = sum148;
+    double binop170 = acc + cur_val;
+    acc = binop170;
+    final_result = acc;
+    printf("%f\n", final_result);
+    printf("result = %f\n", acc);
     return 0;
 }

@@ -5,6 +5,7 @@ use astranovac::lexer::lex;
 use astranovac::parser::Parser;
 use astranovac::codegen::Codegen;
 use astranovac::typecheck::{TypeEnv, TokenEnv, FnEnv, infer_definition};
+use astranovac::lexer::math_notation::lex_math;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -59,30 +60,29 @@ fn main() {
         source = source.replace("__INPUT__", "\"\"");
     }
 
-    let tokens = lex(&source);
+    let tokens = if filename.ends_with(".astr2") {
+        lex_math(&source)
+    } else {
+        lex(&source)
+    };
     let mut parser = Parser::new(tokens);
     let mut program = parser.parse_program();
-    // --- Single type‑check pass (shared between build and run) ---
+
+    // --- Single type‑check pass ---
     let mut env = TypeEnv::new();
     let mut tokens = TokenEnv::new();
     let mut fns = FnEnv::new();
     tokens.insert("ConsoleToken".to_string());
-
     for def in &program {
         if let Err(e) = infer_definition(def, &mut env, &tokens, &mut fns) {
             panic!("Type error: {:?}", e);
         }
     }
-        // Nuclear Optimizer pass
-    use astranovac::optimizer;
-    use astranovac::ast::Definition;
-    for def in &mut program {
-        match def {
-            Definition::Let { body, .. } => *body = optimizer::optimize(body),
-            Definition::Const { value, .. } => *value = optimizer::optimize(value),
-        }
-    }
-        // --- Nuclear Optimizer pass ---
+
+    // --- Dead‑code elimination (whole‑program) ---
+    astranovac::optimizer::dead_code_eliminate(&mut program);
+
+    // --- Expression‑level optimizer (pattern rewrites + constant‑folding) ---
     for def in &mut program {
         match def {
             astranovac::ast::Definition::Let { body, .. } => {
@@ -91,7 +91,6 @@ fn main() {
             astranovac::ast::Definition::Const { value, .. } => {
                 *value = astranovac::optimizer::optimize(value);
             }
-           
         }
     }
 
@@ -111,10 +110,10 @@ fn main() {
             println!("C code written to {}", c_path);
 
             let exe_path = format!("{}.exe", filename.trim_end_matches(".astr"));
-            let status = Command::new("gcc")
-                .args(&[&c_path, "-o", &exe_path, "-lm"])
+            let status = Command::new("clang")
+                .args(&[&c_path, "-o", &exe_path, "-lm", "-O2"])
                 .status()
-                .expect("Failed to execute gcc. Make sure gcc is in your PATH.");
+                .expect("Failed to execute clang. Make sure clang is in your PATH.");
             if !status.success() {
                 eprintln!("GCC compilation failed.");
                 return;
@@ -138,7 +137,7 @@ fn main() {
             for def in &program {
                 match infer_definition(def, &mut env, &tokens, &mut fns) {
                     Ok(ty) => eprintln!("✓ {:?} → {:?}",
-                                      match def { Definition::Let{name,..} => name, _ => "const" }, ty),
+                                      match def { astranovac::ast::Definition::Let{name,..} => name, _ => "const" }, ty),
                     Err(e) => eprintln!("Type error: {:?}", e),
                 }
             }

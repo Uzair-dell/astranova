@@ -1,5 +1,6 @@
 //! Astranova Lexer – converts raw source text into tokens.
 //! Supports % line comments, all LaTeX commands, and separates _ from command names.
+pub mod math_notation;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
@@ -54,7 +55,8 @@ pub enum Token {
     CasesEnd,
     Amp,
     Dot,
-
+    QMark,          // ?  – compact cases introducer
+    Arrow,          // → – branch separator
     // Kept for compatibility; no longer emitted by the lexer.
     // Unit annotations are now parsed via LSquare/RSquare in the type parser.
     UnitAnnotation(String),
@@ -133,14 +135,22 @@ impl<'a> Lexer<'a> {
         self.advance(); // skip opening quote
         let start = self.pos;
         while let Some(c) = self.current_char() {
+            // If we hit a backslash, skip it and whatever follows it
+            if c == '\\' {
+                self.advance();          // skip the backslash
+                if self.current_char().is_some() {
+                    self.advance();      // skip the escaped character
+                }
+                continue;                // don't treat a closing quote inside an escape
+            }
             if c == '"' {
                 let s = self.input[start..self.pos].to_string();
-                self.advance(); // skip closing quote
+                self.advance();          // skip closing quote
                 return s;
             }
             self.advance();
         }
-        "".to_string()
+        String::new()
     }
 
     fn next_token(&mut self) -> Option<Token> {

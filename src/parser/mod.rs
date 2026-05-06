@@ -32,16 +32,35 @@ impl Parser {
     }
 
     // ---------- top‑level program ----------
-    pub fn parse_program(&mut self) -> Vec<Definition> {
+        pub fn parse_program(&mut self) -> Vec<Definition> {
         let mut definitions = Vec::new();
         while self.peek().is_some() {
+            // Check for top‑level "identifier = expr" → \let id = expr
+            if let Some(Token::Identifier(name)) = self.peek().cloned() {
+                let saved_pos = self.pos;          // remember where we are
+                self.advance();                     // consume identifier
+                if self.peek() == Some(&Token::Equal) {
+                    self.advance();                 // consume =
+                    let body = self.parse_expr(0);
+                    definitions.push(Definition::Let {
+                        name,
+                        params: vec![],
+                        is_func: false,
+                        body,
+                    });
+                    continue;                       // done with this definition
+                } else {
+                    // Not an assignment – reset position and fall through to the old match
+                    self.pos = saved_pos;
+                }
+            }
+
             match self.peek() {
                 Some(Token::Let)   => definitions.push(self.parse_let()),
                 Some(Token::Const) => definitions.push(self.parse_const()),
                 Some(Token::World) => definitions.push(self.parse_world()),
-                                _ => {
+                _ => {
                     let mut expr = self.parse_expr(0);
-                    // Sequence multiple statements at the top level
                     if self.peek() == Some(&Token::Semicolon) {
                         let mut exprs = vec![expr];
                         while self.peek() == Some(&Token::Semicolon) {
@@ -63,17 +82,35 @@ impl Parser {
     }
 
     // -------- @world --------
-    fn parse_world(&mut self) -> Definition {
-        self.advance(); // '@world'
+        fn parse_world(&mut self) -> Definition {
+        self.advance(); // consume World token
         let inner = match self.peek() {
-            Some(Token::StringLiteral(s)) => { let m = s.clone(); self.advance(); Expr::StringLiteral(m) }
-            Some(Token::Identifier(id)) if id == "Print" => {
-                self.advance(); self.expect(Token::LParen);
-                let expr = self.parse_expr(0); self.expect(Token::RParen);
-                Expr::FunctionCall { name: "Print".to_string(), args: vec![expr] }
+            // Skin A / classic: @world "string" or @world Print(...)
+            Some(Token::StringLiteral(s)) => {
+                let m = s.clone();
+                self.advance();
+                Expr::StringLiteral(m)
             }
-            _ => panic!("Expected string or Print after @world"),
+            Some(Token::Identifier(id)) if id == "Print" => {
+                self.advance();
+                self.expect(Token::LParen);
+                let expr = self.parse_expr(0);
+                self.expect(Token::RParen);
+                Expr::FunctionCall {
+                    name: "Print".to_string(),
+                    args: vec![expr],
+                }
+            }
+            // Skin B / shorthand: ▷ expr   (implicit Print)
+            _ => {
+                let expr = self.parse_expr(0);
+                Expr::FunctionCall {
+                    name: "Print".to_string(),
+                    args: vec![expr],
+                }
+            }
         };
+
         Definition::Let {
             name: "@world".to_string(),
             params: vec![],
@@ -342,6 +379,8 @@ impl Parser {
 
             // -------- \sum / \prod (optional superscript) --------
             Token::Sum | Token::Prod => self.parse_sum_prod(),
+            // -------- compact cases (Skin B) --------
+            Token::QMark => self.parse_compact_cases(),
 
             // -------- \begin{cases} ... \end{cases} --------
             Token::CasesBegin => self.parse_cases(),
@@ -419,6 +458,28 @@ impl Parser {
                 _ => break,
             }
         }
+        Expr::Cases { branches }
+    }
+        // -------- compact cases:  ? ( cond → val , cond → val , 1 → default ) --------
+    fn parse_compact_cases(&mut self) -> Expr {
+        self.expect(Token::LParen);    // consume '('
+        let mut branches = Vec::new();
+
+        loop {
+            // condition
+            let cond = self.parse_expr(0);
+            self.expect(Token::Arrow);   // consume '→'
+            // value
+            let value = self.parse_expr(0);
+            branches.push((value, cond));
+
+            match self.peek() {
+                Some(Token::Comma) => { self.advance(); }   // next branch
+                Some(Token::RParen) => { self.advance(); break; }
+                _ => panic!("Expected ',' or ')' inside compact cases"),
+            }
+        }
+
         Expr::Cases { branches }
     }
 }

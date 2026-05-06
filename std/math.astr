@@ -1,0 +1,8 @@
+% std/math.astr – basic mathematical helpers
+
+\let power10(n) = \begin{cases}
+    1    & n == 0 \\
+    10   & n == 1 \\
+    100  & n == 2 \\
+    1000 & 1
+\end{cases}
