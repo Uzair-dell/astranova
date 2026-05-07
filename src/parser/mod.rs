@@ -1,5 +1,6 @@
 //! Astranova Parser – final production version
 //! Supports assignment, sequencing, subscripts, array allocation, and the full language.
+//! FIX: case branches now accept `value ; stmt ; … ; final-expr & condition`.
 
 use crate::ast::{BinOp, Definition, Expr, Type, UnOp};
 use crate::lexer::Token;
@@ -32,15 +33,15 @@ impl Parser {
     }
 
     // ---------- top‑level program ----------
-        pub fn parse_program(&mut self) -> Vec<Definition> {
+    pub fn parse_program(&mut self) -> Vec<Definition> {
         let mut definitions = Vec::new();
         while self.peek().is_some() {
             // Check for top‑level "identifier = expr" → \let id = expr
             if let Some(Token::Identifier(name)) = self.peek().cloned() {
-                let saved_pos = self.pos;          // remember where we are
-                self.advance();                     // consume identifier
+                let saved_pos = self.pos;
+                self.advance();
                 if self.peek() == Some(&Token::Equal) {
-                    self.advance();                 // consume =
+                    self.advance();
                     let body = self.parse_expr(0);
                     definitions.push(Definition::Let {
                         name,
@@ -48,9 +49,8 @@ impl Parser {
                         is_func: false,
                         body,
                     });
-                    continue;                       // done with this definition
+                    continue;
                 } else {
-                    // Not an assignment – reset position and fall through to the old match
                     self.pos = saved_pos;
                 }
             }
@@ -82,10 +82,9 @@ impl Parser {
     }
 
     // -------- @world --------
-        fn parse_world(&mut self) -> Definition {
+    fn parse_world(&mut self) -> Definition {
         self.advance(); // consume World token
         let inner = match self.peek() {
-            // Skin A / classic: @world "string" or @world Print(...)
             Some(Token::StringLiteral(s)) => {
                 let m = s.clone();
                 self.advance();
@@ -101,7 +100,6 @@ impl Parser {
                     args: vec![expr],
                 }
             }
-            // Skin B / shorthand: ▷ expr   (implicit Print)
             _ => {
                 let expr = self.parse_expr(0);
                 Expr::FunctionCall {
@@ -207,36 +205,34 @@ impl Parser {
     }
 
     fn parse_unit_opt(&mut self) -> Option<crate::ast::Unit> {
-    if self.peek() == Some(&Token::LSquare) {
-        self.advance(); // consume '['
-        let mut unit_str = String::new();
-        // Read the unit content: one or more identifiers/operators inside brackets
-        while let Some(tok) = self.peek() {
-            match tok {
-                Token::Identifier(s) | Token::GreekLetter(s) => {
-                    unit_str.push_str(s);
-                    self.advance();
+        if self.peek() == Some(&Token::LSquare) {
+            self.advance(); // consume '['
+            let mut unit_str = String::new();
+            while let Some(tok) = self.peek() {
+                match tok {
+                    Token::Identifier(s) | Token::GreekLetter(s) => {
+                        unit_str.push_str(s);
+                        self.advance();
+                    }
+                    Token::RSquare => { break; }
+                    Token::Star | Token::Slash | Token::Caret => {
+                        unit_str.push(match tok {
+                            Token::Star => '*', Token::Slash => '/', Token::Caret => '^',
+                            _ => unreachable!(),
+                        });
+                        self.advance();
+                    }
+                    _ => break,
                 }
-                Token::RSquare => { break; }
-                Token::Star | Token::Slash | Token::Caret => {
-                    // allow operators inside unit (e.g., m/s, m^2)
-                    unit_str.push(match tok {
-                        Token::Star => '*', Token::Slash => '/', Token::Caret => '^',
-                        _ => unreachable!(),
-                    });
-                    self.advance();
-                }
-                _ => break,
             }
+            self.expect(Token::RSquare);
+            let mut map = std::collections::HashMap::new();
+            map.insert(unit_str, 1);
+            Some(map)
+        } else {
+            None
         }
-        self.expect(Token::RSquare);
-        let mut map = std::collections::HashMap::new();
-        map.insert(unit_str, 1);
-        Some(map)
-    } else {
-        None
     }
-}
 
     // ---------- expressions ----------
     fn parse_expr(&mut self, min_prec: u8) -> Expr {
@@ -288,9 +284,6 @@ impl Parser {
                 _ => panic!("Assignment target must be a variable or subscript, found {:?}", left),
             }
         }
-
-        // Sequencing with semicolons (only at the outermost level)
-        
 
         left
     }
@@ -421,7 +414,6 @@ impl Parser {
         } else { st.clone() };
         let mut body = self.parse_expr(0);
 
-        // Handle semicolon sequencing inside sum/prod bodies
         if self.peek() == Some(&Token::Semicolon) {
             let mut exprs = vec![body];
             while self.peek() == Some(&Token::Semicolon) {
@@ -435,23 +427,35 @@ impl Parser {
         else { Expr::Prod { index: idx, start: Box::new(st), end: Box::new(en), body: Box::new(body) } }
     }
 
-       fn parse_cases(&mut self) -> Expr {
+    // -------- \begin{cases} … \end{cases} (with value‑block support) --------
+    fn parse_cases(&mut self) -> Expr {
         let mut branches = Vec::new();
         loop {
             if self.peek() == Some(&Token::CasesEnd) { self.advance(); break; }
-            // Parse value expression (possibly multiple statements separated by ;)
-            let mut value = self.parse_expr(0);
-            if self.peek() == Some(&Token::Semicolon) {
-                let mut exprs = vec![value];
-                while self.peek() == Some(&Token::Semicolon) {
+            // --- value block (sequence of exprs separated by ';') ---
+            let mut value_parts = Vec::new();
+            loop {
+                value_parts.push(self.parse_expr(0));
+                // stop if next token is '&' (condition separator)
+                if self.peek() == Some(&Token::Amp) { break; }
+                // otherwise require ';' to continue the value block
+                if self.peek() == Some(&Token::Semicolon) {
                     self.advance();
-                    exprs.push(self.parse_expr(0));
+                } else {
+                    // unexpected token – probably the start of the next branch
+                    break;
                 }
-                value = Expr::Block(exprs);
             }
+            let value = if value_parts.len() == 1 {
+                value_parts.into_iter().next().unwrap()
+            } else {
+                Expr::Block(value_parts)
+            };
+            // --- condition ---
             self.expect(Token::Amp);
             let cond = self.parse_expr(0);
             branches.push((value, cond));
+            // --- branch separator ---
             match self.peek() {
                 Some(Token::Backslash) => { self.advance(); }
                 Some(Token::CasesEnd)  => { self.advance(); break; }
@@ -460,21 +464,20 @@ impl Parser {
         }
         Expr::Cases { branches }
     }
-        // -------- compact cases:  ? ( cond → val , cond → val , 1 → default ) --------
+
+    // -------- compact cases:  ? ( cond → val , cond → val , 1 → default ) --------
     fn parse_compact_cases(&mut self) -> Expr {
-        self.expect(Token::LParen);    // consume '('
+        self.expect(Token::LParen);
         let mut branches = Vec::new();
 
         loop {
-            // condition
             let cond = self.parse_expr(0);
-            self.expect(Token::Arrow);   // consume '→'
-            // value
+            self.expect(Token::Arrow);
             let value = self.parse_expr(0);
             branches.push((value, cond));
 
             match self.peek() {
-                Some(Token::Comma) => { self.advance(); }   // next branch
+                Some(Token::Comma) => { self.advance(); }
                 Some(Token::RParen) => { self.advance(); break; }
                 _ => panic!("Expected ',' or ')' inside compact cases"),
             }

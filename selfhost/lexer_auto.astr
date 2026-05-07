@@ -1,0 +1,84 @@
+\let source = "12 + 34 * 2"
+\let src_len = length(source)
+
+% Token storage (50 tokens × 3 fields)
+\let tokens = array(150)
+
+% Global mutable state
+\let pos = 0
+\let tok_count = 0
+\let tp = 0
+\let ln = 0
+
+% Character predicates
+\let is_digit(p)  = char_at(source,p) \ge 48 \land char_at(source,p) \le 57
+\let is_space(p)  = char_at(source,p) == 32
+\let is_plus(p)   = char_at(source,p) == 43
+\let is_star(p)   = char_at(source,p) == 42
+
+% Token type
+\let tok_type(p) = \begin{cases}
+    2 & is_digit(p) \\
+    4 & is_plus(p) \\
+    5 & is_star(p) \\
+    0 & 1
+\end{cases}
+
+% Token length
+\let tok_len(p) = \begin{cases}
+    2 & is_digit(p) \land is_digit(p+1) \\
+    1 & is_digit(p) \\
+    1 & is_plus(p) \\
+    1 & is_star(p) \\
+    0 & 1
+\end{cases}
+
+% --- Scanning loop ---
+% The loop runs src_len times, each iteration handles one character or token.
+% After the loop, pos will have moved past the end of the source.
+
+\let dummy = \sum_{i=1}^{src_len} (
+    \begin{cases}
+        % Branch 1 – skip a space
+        pos = pos + 1 ;
+        pos
+        &
+        is_space(pos) \land pos < src_len
+        \\
+        
+        % Branch 2 – record a token
+        tp = tok_type(pos) ;
+        ln = tok_len(pos) ;
+        tokens[tok_count*3] = tp ;
+        tokens[tok_count*3+1] = pos ;
+        tokens[tok_count*3+2] = pos + ln ;
+        pos = pos + ln ;
+        tok_count = tok_count + 1 ;
+        pos
+        &
+        \lnot is_space(pos) \land pos < src_len
+        \\
+        
+        % Branch 3 – past end or any other case → do nothing
+        pos
+        &
+        1
+    \end{cases}
+    ;
+    0
+)
+
+% --- Print results ---
+@world Print("Token count:")
+@world Print(tok_count)
+
+\let di = \sum_{j=0}^{tok_count-1} (
+    \let t = get(tokens, j*3)
+    \let s = get(tokens, j*3+1)
+    \let e = get(tokens, j*3+2)
+    @world Print("Token:")
+    @world Print(t)
+    @world Print(s)
+    @world Print(e)
+    0
+)

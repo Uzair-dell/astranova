@@ -65,9 +65,6 @@ impl Codegen {
                     self.functions.insert(name.clone(), (params.clone(), body.clone()));
                 } else if !params.is_empty() {
                 } else if !name.is_empty() && name != "@world" {
-                    // Only numeric globals are inserted here.
-                    // String/tuple/array alloc bodies are excluded.
-                    // Also exclude concat calls and string‑returning built‑ins.
                     let is_string_call = if let Expr::FunctionCall { name: fname, .. } = body {
                         fname == "concat" || fname == "emit_line" || fname == "flush_lines"
                     } else {
@@ -118,7 +115,6 @@ impl Codegen {
                                 self.locals.insert(name.clone(), name.clone());
                                 self.last_result = Some(format!("\"{}\"", ""));
                             } else if fname == "emit_line" && args.len() == 2 {
-                                // emit_line is a void‑returning built‑in; handle it in compile_expr
                                 let _ = self.compile_expr(body)?;
                             } else if fname == "flush_lines" && args.len() == 1 {
                                 let _ = self.compile_expr(body)?;
@@ -418,7 +414,7 @@ impl Codegen {
                 Ok(result)
             }
 
-            // ---------- Sum (with limited constant‑unrolling) ----------
+            // ---------- Sum (with constant‑unrolling for small loops) ----------
             Expr::Sum { index, start, end, body } => {
                 let start_val = self.compile_expr(start)?;
                 let end_val = self.compile_expr(end)?;
@@ -431,6 +427,7 @@ impl Codegen {
                         let mut i_val = *start_n;
 
                         self.locals.insert(index.clone(), format!("{:.10}", i_val));
+                        // 👇 FIX: all globals visible inside the unrolled body
                         for g in self.globals.clone() {
                             if !self.locals.contains_key(&g) {
                                 self.locals.insert(g.clone(), g.clone());
@@ -448,6 +445,7 @@ impl Codegen {
                     }
                 }
 
+                // dynamic loop (already has globals insertion)
                 let result = self.fresh("sum");
                 self.locals.insert(index.clone(), index.clone());
                 writeln!(self.code, "    double {} = 0.0;", result).unwrap();
@@ -465,7 +463,7 @@ impl Codegen {
                 Ok(result)
             }
 
-            // ---------- Prod (with limited constant‑unrolling) ----------
+            // ---------- Prod (with constant‑unrolling for small loops) ----------
             Expr::Prod { index, start, end, body } => {
                 let start_val = self.compile_expr(start)?;
                 let end_val = self.compile_expr(end)?;
@@ -478,6 +476,7 @@ impl Codegen {
                         let mut i_val = *start_n;
 
                         self.locals.insert(index.clone(), format!("{:.10}", i_val));
+                        // 👇 FIX: all globals visible inside the unrolled body
                         for g in self.globals.clone() {
                             if !self.locals.contains_key(&g) {
                                 self.locals.insert(g.clone(), g.clone());
@@ -495,6 +494,7 @@ impl Codegen {
                     }
                 }
 
+                // dynamic loop (already has globals insertion)
                 let result = self.fresh("prod");
                 self.locals.insert(index.clone(), index.clone());
                 writeln!(self.code, "    double {} = 1.0;", result).unwrap();
