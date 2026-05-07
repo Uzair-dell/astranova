@@ -584,6 +584,39 @@ impl Codegen {
                 Ok(result)
             }
 
+                       // ---------- @world pragma inside an expression ----------
+            Expr::WorldPragma(inner) => {
+                match &**inner {
+                    Expr::StringLiteral(msg) => {
+                        writeln!(self.code, "    world_print(\"{}\");", c_escape(msg)).unwrap();
+                        Ok("0".to_string())
+                    }
+                    Expr::FunctionCall { name, args } if name == "Print" && args.len() == 1 => {
+                        match &args[0] {
+                            Expr::StringLiteral(msg) => {
+                                writeln!(self.code, "    printf(\"%s\\n\", \"{}\");", c_escape(msg)).unwrap();
+                                Ok("0".to_string())
+                            }
+                            Expr::Variable(vname) => {
+                                if self.string_vars.contains(vname) {
+                                    writeln!(self.code, "    printf(\"%s\\n\", {});", vname).unwrap();
+                                } else {
+                                    let val = self.compile_expr(&args[0])?;
+                                    writeln!(self.code, "    printf(\"%f\\n\", {});", val).unwrap();
+                                }
+                                Ok("0".to_string())
+                            }
+                            _ => {
+                                let val = self.compile_expr(&args[0])?;
+                                writeln!(self.code, "    printf(\"%f\\n\", {});", val).unwrap();
+                                Ok("0".to_string())
+                            }
+                        }
+                    }
+                    _ => Err(format!("Unsupported @world inside expression: {:?}", inner)),
+                }
+            }
+
             _ => Err(format!("Codegen not implemented for {:?}", expr)),
         }
     }

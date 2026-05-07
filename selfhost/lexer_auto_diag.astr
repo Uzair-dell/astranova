@@ -1,20 +1,11 @@
 \let source = "12 + 34 * 2"
 \let src_len = length(source)
 
-% Token storage
-\let tokens = array(150)
-
-% Global mutable state
 \let pos = 0
 \let tok_count = 0
 \let tp = 0
 \let ln = 0
 \let should = 0
-\let idx = 0
-
-\let t = 0
-\let s = 0
-\let e = 0
 
 \let is_digit(p)  = char_at(source,p) \ge 48 \land char_at(source,p) \le 57
 \let is_space(p)  = char_at(source,p) == 32
@@ -45,13 +36,13 @@
     ;
     ln = tok_len(pos)
     ;
-    idx = tok_count * 3
+    @world Print("Token:")
     ;
-    tokens[idx]   = tp
+    @world Print(tp)
     ;
-    tokens[idx+1] = pos
+    @world Print(pos)
     ;
-    tokens[idx+2] = pos + ln
+    @world Print(pos + ln)
     ;
     pos = pos + ln * should
     ;
@@ -59,22 +50,5 @@
     ;
     0
 
-@world Print("Token count:")
+@world Print("Total tokens:")
 @world Print(tok_count)
-
-\let di = \sum_{j=0}^{tok_count-1}
-    t = get(tokens, j*3)
-    ;
-    s = get(tokens, j*3+1)
-    ;
-    e = get(tokens, j*3+2)
-    ;
-    @world Print("Token:")
-    ;
-    @world Print(t)
-    ;
-    @world Print(s)
-    ;
-    @world Print(e)
-    ;
-    0
